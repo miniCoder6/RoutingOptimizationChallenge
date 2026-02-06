@@ -2,12 +2,13 @@
 #include <string>
 
 struct Employee {
-    int id; // Internal index
+    int id;
     std::string originalId;
     int priority;
     double x, y;
     double destX, destY;
-    double ready, due; // In minutes from midnight
-    bool wantsPremium;
-    int sharePref; // 1=Single, 2=Double, 3=Triple
+    double ready, due; 
+    std::string vehiclePref; // "premium", "normal", or "any"
+    int sharePref; 
 };
+
