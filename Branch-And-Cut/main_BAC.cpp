@@ -15,8 +15,12 @@
 #include "utils.h"
 #include "GraphBuilder.h"
 #include "Solver.h"
+#include "matrix.h"
 
 std::mt19937_64 RNG(std::chrono::steady_clock::now().time_since_epoch().count());
+
+extern int N;
+extern int V;
 
 // --- Helper Functions for Printing ---
 
@@ -443,28 +447,33 @@ void loadMetadata(const std::string &filename, std::map<int, int> &delays, doubl
 
 // --- Main Execution ---
 
-int main()
+int main(int argc, char **argv)
 {
     std::srand(std::time(nullptr));
     std::map<int, int> priority_delays = {{1, 10}, {2, 20}, {3, 30}, {4, 45}, {5, 60}};
     double dist_cost = 1.0;
     double time_cost = 0.0;
 
-    std::string temp;
-    std::cout << "METADATA FILE NAME : ";
-    std::cin >> temp;
-    temp += ".csv";
-    loadMetadata(temp, priority_delays, dist_cost, time_cost);
+    // std::string temp;
+    // std::cout << "METADATA FILE NAME : ";
+    // std::cin >> temp;
+    // temp += ".csv";
+    // loadMetadata(temp, priority_delays, dist_cost, time_cost);
+    loadMetadata(argv[3], priority_delays, dist_cost, time_cost);
 
     // --- 1. LOAD DATA FROM CSV ---
-    std::cout << "VEHICLES FILE NAME : ";
-    std::cin >> temp;
-    temp += ".csv";
-    std::vector<Vehicle> vehicles = loadVehicles(temp);
-    std::cout << "EMPLOYEE FILE NAME : ";
-    std::cin >> temp;
-    temp += ".csv";
-    std::vector<Request> requests = loadRequests(temp, priority_delays);
+    // std::cout << "VEHICLES FILE NAME : ";
+    // std::cin >> temp;
+    // temp += ".csv";
+    std::vector<Vehicle> vehicles = loadVehicles(argv[1]); // loadVehicles(temp);
+    // std::cout << "EMPLOYEE FILE NAME : ";
+    // std::cin >> temp;
+    // temp += ".csv";
+    std::vector<Request> requests = loadRequests(argv[2], priority_delays); // loadRequests(temp, priority_delays);
+
+    N = requests.size();
+    V = vehicles.size();
+    loadMatrix(argv[4], N + V + 1);
     auto begin = std::chrono::high_resolution_clock::now();
 
     if (vehicles.empty() || requests.empty())
@@ -482,9 +491,17 @@ int main()
     solver.dist_cost = dist_cost;
     solver.time_cost = time_cost;
 
+    // std::vector<Solver::Solution> init_sols;
+    // init_sols.reserve(1000);
+    // for(int i = 0; i < 1000; i++){
+    //     Solver::Solution sol;
+    //     solver.buildInitialSolution(sol);
+    //     init_sols.push_back(sol);
+    // }
+
     // std::cout << "enter no. of iterations : ";
     // std::cin >> solver.max_iterations;
-    solver.max_iterations = 50000;
+    solver.max_iterations = 100000;
 
     Solver::Solution solution = solver.solveDeterministicAnnealing();
 

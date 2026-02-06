@@ -46,9 +46,9 @@ struct Request
         if (veh_pref == CATEGORY_ANY)
             return true;
 
-        // If I asked for Normal, I am okay with Normal or Premium (Upgrade)
         if (veh_pref == CATEGORY_NORMAL)
-            return v_cat == CATEGORY_NORMAL;
+            return true;
+        // return v_cat == CATEGORY_NORMAL;
 
         // If I asked for Premium, I strictly want Premium
         if (veh_pref == CATEGORY_PREMIUM)
@@ -91,6 +91,42 @@ struct Node
     int earliest_time;
     int latest_time;
     int service_duration = 0;
+
+    std::string getMatrixId(
+        const std::vector<Request> &reqs,
+        const std::vector<Vehicle> &vehs) const
+    {
+        if (type == PICKUP)
+            return reqs[request_id].original_id; // e.g. "E12"
+
+        if (type == DELIVERY || type == DUMMY_END)
+            return "OFFICE";
+
+        if (type == DUMMY_START)
+            return vehs[vehicle_id].original_id; // e.g. "V3"
+
+        return "";
+    }
+
+    std::string getOriginalRequestId(const std::vector<Request> &reqs) const
+    {
+        if ((type == PICKUP || type == DELIVERY) &&
+            request_id >= 0 && request_id < (int)reqs.size())
+        {
+            return reqs[request_id].original_id;
+        }
+        return "";
+    }
+
+    std::string getOriginalVehicleId(const std::vector<Vehicle> &vehs) const
+    {
+        if ((type == DUMMY_START || type == DUMMY_END) &&
+            vehicle_id >= 0 && vehicle_id < (int)vehs.size())
+        {
+            return vehs[vehicle_id].original_id;
+        }
+        return "";
+    }
 
     Coords getCoords(const std::vector<Request> &reqs, const std::vector<Vehicle> &vehs) const
     {

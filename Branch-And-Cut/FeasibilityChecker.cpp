@@ -1,5 +1,6 @@
 #include "FeasibilityChecker.h"
 #include "utils.h"
+#include "matrix.h"
 #include <map>
 #include <algorithm> // Required for std::remove
 
@@ -49,11 +50,12 @@ bool FeasibilityChecker::runEightStepEvaluation(const std::vector<int> &route_id
         // If the next node is the Dummy End, travel time is 0.
         // This means the vehicle "teleports" to the end state instantly after the last job.
         int travel = 0;
+        std::string from_id = n_prev.getMatrixId(requests, vehicles);
+        std::string to_id = n_curr.getMatrixId(requests, vehicles);
         if (n_curr.type != Node::DUMMY_END)
         {
-            travel = getTravelTime(n_prev.getCoords(requests, vehicles),
-                                   n_curr.getCoords(requests, vehicles),
-                                   vehicle.avg_speed_kmh);
+            travel = getTravelTimeFromMatrix(from_id, to_id,
+                                             vehicle.avg_speed_kmh);
         }
         // --- UPDATED LOGIC END ---
 
