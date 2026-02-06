@@ -4,4 +4,6 @@
 #include "Employee.h"
 #include <vector>
 
-double routeCost(const Route&, const Vehicle&, const std::vector<Employee>&);
+#include "CSVReader.h" // For Metadata
+
+double routeCost(const Route&, const Vehicle&, const std::vector<Employee>&, const Metadata&);
