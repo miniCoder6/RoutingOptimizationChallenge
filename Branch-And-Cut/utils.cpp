@@ -84,7 +84,7 @@ Request createRequest(
     else
         r.max_shared_with = 2;
 
-    double est_direct_dist = getDistance(r.pickup_loc, r.drop_loc);
+    double est_direct_dist = getDistanceFromMatrix(r.original_id, "OFFICE");
 
     // Safe check for direct time
     int direct_time = 0;
@@ -97,7 +97,7 @@ Request createRequest(
 
     // r.max_ride_time = direct_time + allowed_delay;
     r.latest_drop += allowed_delay;
-    r.service_time = 3;
+    r.service_time = 0;
 
     return r;
 }

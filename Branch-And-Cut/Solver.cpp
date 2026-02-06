@@ -52,9 +52,12 @@ double Solver::calculateRouteCost(const std::vector<int> &route_ids, const Vehic
         double dist = 0, time = 0;
         if (n_next.type != Node::DUMMY_END)
         {
-            Coords c1 = n_u.getCoords(requests, vehicles);
-            Coords c2 = n_next.getCoords(requests, vehicles);
-            dist = getDistance(c1, c2);
+            // Coords c1 = n_u.getCoords(requests, vehicles);
+            // Coords c2 = n_next.getCoords(requests, vehicles);
+            // dist = getDistance(c1, c2);
+            std::string c1 = n_u.getMatrixId(requests, vehicles);
+            std::string c2 = n_next.getMatrixId(requests, vehicles);
+            dist = getDistanceFromMatrix(c1, c2);
             double speed = (v.avg_speed_kmh > 0) ? v.avg_speed_kmh : 30.0;
             time = (dist / speed) * 60.0;
         }
@@ -759,7 +762,11 @@ double Solver::calculateAverageEdgeCost()
     {
         int r1 = rand() % requests.size();
         int r2 = rand() % requests.size();
-        sum += getDistance(requests[r1].pickup_loc, requests[r2].drop_loc);
+
+        // sum += getDistance(requests[r1].pickup_loc, requests[r2].drop_loc);
+        std::string from_id = requests[r1].original_id;
+        std::string to_id = "OFFICE";
+        sum += getDistanceFromMatrix(from_id, to_id);
         count++;
     }
     return (count > 0) ? sum / count : 10.0;
