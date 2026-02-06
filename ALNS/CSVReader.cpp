@@ -6,7 +6,6 @@
 #include <vector>
 #include <algorithm>
 
-// Helper to parse HH:MM to minutes
 static double parseTime(const std::string& tStr) {
     size_t colon = tStr.find(':');
     if (colon == std::string::npos) return 0.0;
@@ -19,7 +18,6 @@ static double parseTime(const std::string& tStr) {
     }
 }
 
-// Helper to trim check
 static std::string trim(const std::string& str) {
     size_t first = str.find_first_not_of(" \t\r\n");
     if (std::string::npos == first) return str;
@@ -34,12 +32,11 @@ std::vector<Employee> readEmployees(const std::string& path) {
         return {};
     }
     std::string line;
-    std::getline(f, line); // Skip header
+    std::getline(f, line); 
 
     std::vector<Employee> data;
     int dataIdx = 0;
 
-    // Headers: User identifier,Priority,PickX,PickY,DestX,DestY,Start,End,VehPref,SharePref
     while (std::getline(f, line)) {
         if (line.empty()) continue;
         std::stringstream ss(line);
@@ -66,17 +63,14 @@ std::vector<Employee> readEmployees(const std::string& path) {
             continue;
         }
         
-        // Vehicle pref
         std::string vp = row[8];
-        if (vp == "premium") e.wantsPremium = true;
-        else e.wantsPremium = false;
+        e.vehiclePref = vp; // "premium", "normal", or "any"
 
-        // Share pref
         std::string sp = row[9];
         if (sp == "single") e.sharePref = 1;
         else if (sp == "double") e.sharePref = 2;
         else if (sp == "triple") e.sharePref = 3;
-        else e.sharePref = 3; // Default?
+        else e.sharePref = 3; 
 
         data.push_back(e);
     }
@@ -90,12 +84,10 @@ std::vector<Vehicle> readVehicles(const std::string& path) {
         return {};
     }
     std::string line;
-    std::getline(f, line); // Skip header
-
+    std::getline(f, line);
     std::vector<Vehicle> data;
     int dataIdx = 0;
 
-    // Headers: ID,Fuel,Mode,Cap,Cost,Speed,X,Y,Avail,Cat
     while (std::getline(f, line)) {
         if (line.empty()) continue;
         std::stringstream ss(line);
@@ -122,13 +114,67 @@ std::vector<Vehicle> readVehicles(const std::string& path) {
             std::cerr << "Parse error in line: " << line << std::endl;
             continue;
         }
-
-        v.endTime = 24.0 * 60.0; // Default end of day
-
+        v.endTime = 24.0 * 60.0;
         std::string cat = row[9];
         v.premium = (cat == "premium");
-
         data.push_back(v);
     }
     return data;
 }
+
+Metadata readMetadata(const std::string& path) {
+    Metadata meta;
+    // Default values
+    meta.objectiveCostWeight = 0.7;
+    meta.objectiveTimeWeight = 0.3;
+    meta.priority_1_max_delay_min=5;
+    meta.priority_2_max_delay_min=10;
+    meta.priority_3_max_delay_min=15;
+    meta.priority_4_max_delay_min=20;
+    meta.priority_5_max_delay_min=30;
+
+    std::ifstream f(path);
+
+    if (!f.is_open()) {
+        std::cerr << "Error opening file: " << path << std::endl;
+        return meta;
+    }
+
+    std::string line;
+    std::getline(f, line); // header
+
+    while (std::getline(f, line)) {
+        if (line.empty()) continue;
+        std::stringstream ss(line);
+        std::string key, val;
+        if (std::getline(ss, key, ',') && std::getline(ss, val, ',')) {
+            key = trim(key);
+            val = trim(val);
+            try {
+                if (key == "objective_cost_weight") {
+                    meta.objectiveCostWeight = std::stod(val);
+                } else if (key == "objective_time_weight") {
+                    meta.objectiveTimeWeight = std::stod(val);
+                } else if (key == "priority_1_max_delay_min") {
+                    meta.priority_1_max_delay_min = std::stoi(val);
+                }
+                else if (key == "priority_2_max_delay_min") {
+                    meta.priority_2_max_delay_min = std::stoi(val);
+                }
+                else if (key == "priority_3_max_delay_min") {
+                    meta.priority_3_max_delay_min = std::stoi(val);
+                }
+                else if (key == "priority_4_max_delay_min") {
+                    meta.priority_4_max_delay_min = std::stoi(val);
+                }
+                else if (key == "priority_5_max_delay_min") {
+                    meta.priority_5_max_delay_min = std::stoi(val);
+                }
+            } catch (...) {
+                std::cerr << "Error parsing metadata value for key: " << key << std::endl;
+            }
+        }
+    }
+    return meta;
+}
+
