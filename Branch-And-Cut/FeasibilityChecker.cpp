@@ -7,8 +7,8 @@
 FeasibilityChecker::FeasibilityChecker(
     const std::vector<Node> &n,
     const std::vector<Request> &r,
-    const std::vector<Vehicle> &v,
-    int global_cap) : nodes(n), requests(r), vehicles(v), max_global_capacity(global_cap) {}
+    const std::vector<Vehicle> &U,
+    int global_cap) : nodes(n), requests(r), vehicles(U), max_global_capacity(global_cap) {}
 
 bool FeasibilityChecker::checkInsert(
     const std::vector<int> &current_route_ids,
@@ -26,10 +26,10 @@ bool FeasibilityChecker::checkInsert(
 
 bool FeasibilityChecker::runEightStepEvaluation(const std::vector<int> &route_ids, int veh_idx)
 {
-    int V = route_ids.size();
+    int U = route_ids.size();
     const Vehicle &vehicle = vehicles[veh_idx];
 
-    std::vector<int> A(V), D(V), W(V), L(V);
+    std::vector<int> A(U), D(U), W(U), L(U);
 
     int start_node = route_ids[0];
     A[0] = nodes[start_node].earliest_time;
@@ -39,7 +39,7 @@ bool FeasibilityChecker::runEightStepEvaluation(const std::vector<int> &route_id
     std::vector<int> active_requests;
 
     // Step 2: Forward Pass
-    for (int i = 1; i < V; ++i)
+    for (int i = 1; i < U; ++i)
     {
         int prev = route_ids[i - 1];
         int curr = route_ids[i];
@@ -100,22 +100,22 @@ bool FeasibilityChecker::runEightStepEvaluation(const std::vector<int> &route_id
     }
 
     // Step 3: Forward Time Slack
-    std::vector<int> F(V);
-    F[V - 1] = nodes[route_ids[V - 1]].latest_time - A[V - 1];
+    std::vector<int> F(U);
+    F[U - 1] = nodes[route_ids[U - 1]].latest_time - A[U - 1];
 
-    for (int i = V - 2; i >= 0; --i)
+    for (int i = U - 2; i >= 0; --i)
     {
         const Node &n_curr = nodes[route_ids[i]];
         F[i] = std::min(n_curr.latest_time - (A[i] + W[i]), F[i + 1] + W[i + 1]);
     }
 
     // Step 4: Duration Checks
-    int total_duration = D[V - 1] - A[0];
+    int total_duration = D[U - 1] - A[0];
     if (total_duration > 720)
         return false;
 
     // std::map<int, int> pickup_indices;
-    // for (int i = 0; i < V; ++i) {
+    // for (int i = 0; i < U; ++i) {
     //     int node_id = route_ids[i];
     //     const Node& n = nodes[node_id];
 
