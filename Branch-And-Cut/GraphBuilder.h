@@ -1,6 +1,6 @@
 #ifndef GRAPHBUILDER_H
 #define GRAPHBUILDER_H
-
+#pragma once
 #include "structures.h"
 #include <vector>
 

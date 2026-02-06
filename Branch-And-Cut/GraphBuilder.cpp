@@ -1,5 +1,4 @@
 #include "GraphBuilder.h"
-
 GraphBuilder::GraphBuilder(const std::vector<Request> &requests, const std::vector<Vehicle> &vehicles)
 {
     n_u = requests.size();

@@ -1,37 +1,40 @@
-# Detect OS
-ifeq ($(OS),Windows_NT)
-    # Windows settings
-    RM = del /Q /F
-    TARGET = main_BAC
-    FixPath = $(subst /,\,$1)
-    EXEC = $(TARGET)
-else
-    # Mac/Linux settings
-    RM = rm -f
-    TARGET = main_BAC
-    FixPath = $1
-    EXEC = ./$(TARGET)
-endif
+# ---------------- CONFIGURATION ----------------
+# Compiler Settings
+CXX      := g++
+# Flags: C++17 is required for your code. -O3 for optimization.
+CXXFLAGS := -std=c++17 -O3 -Wall -pthread
 
-# Variables
-CXX = g++
-CXXFLAGS = -std=c++17 -O3
-SRCS = main_BAC.cpp matrix.cpp utils.cpp FeasibilityChecker.cpp GraphBuilder.cpp Solver.cpp 
-OBJS = $(SRCS:.cpp=.o)
+# Target Executable Name
+# IMPORTANT: If this is the "Branch-And-Cut" folder, keep it as main_BAC
+# If this is the "ALNS" folder, change it to main_ALNS
+TARGET   := main_BAC
 
-# Default target
+# ---------------- AUTOMATION ----------------
+# 1. Automatically find all .cpp files in this folder
+# (e.g., main.cpp, Solver.cpp, GraphBuilder.cpp, utils.cpp, matrix.cpp)
+SRCS     := $(wildcard *.cpp)
+
+# 2. Generate corresponding .o file names
+OBJS     := $(SRCS:.cpp=.o)
+
+# ---------------- RULES ----------------
+
+# Default Rule: Build the executable
 all: $(TARGET)
 
+# Link Step: Combine all .o files into the executable
 $(TARGET): $(OBJS)
-	$(CXX) $(CXXFLAGS) $(OBJS) -o $(TARGET)
+	@echo "[$(TARGET)] Linking..."
+	$(CXX) $(CXXFLAGS) -o $(TARGET) $(OBJS)
 
+# Compile Step: Turn .cpp into .o
 %.o: %.cpp
+	@echo "[$(TARGET)] Compiling $<..."
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
-# Cross-platform clean
+# Clean up build files and generated CSVs
 clean:
-	$(RM) *.o $(TARGET) output_vehicle.csv output_employees.csv
+	@echo "[$(TARGET)] Cleaning..."
+	rm -f $(OBJS) $(TARGET) output_vehicle.csv output_employees.csv run_log.txt
 
-# # Cross-platform run
-# run: all
-# 	$(EXEC)
+.PHONY: all clean
