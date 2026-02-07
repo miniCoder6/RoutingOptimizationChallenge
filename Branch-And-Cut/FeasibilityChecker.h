@@ -1,6 +1,6 @@
 #ifndef FEASIBILITYCHECKER_H
 #define FEASIBILITYCHECKER_H
-
+#pragma once
 #include "structures.h"
 #include <vector>
 

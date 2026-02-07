@@ -11,6 +11,7 @@
 #include <iomanip>
 
 using json = nlohmann::json;
+using Matrix = std::vector<std::vector<double>>; // Define Matrix Type
 
 std::mutex log_mutex;
 
@@ -38,12 +39,13 @@ std::vector<std::string> splitLine(const std::string &line) {
 }
 
 /* ===================== STEP 1: MATRIX GENERATION ===================== */
-// Generates 'matrix.txt' and returns a status/log JSON
-json generate_matrix_file(const std::string& empData, const std::string& vehData) {
+// Generates 'matrix.txt' AND populates the in-memory 'outMatrix' vector
+json generate_matrix_file(const std::string& empData, const std::string& vehData, Matrix& outMatrix) {
     json result;
     std::vector<std::pair<double, double>> coords;
 
     // 1. Parse Employees (Pickups)
+    std::pair<double, double> hold;
     std::stringstream empSS(empData);
     std::string line;
     std::getline(empSS, line); 
@@ -51,8 +53,8 @@ json generate_matrix_file(const std::string& empData, const std::string& vehData
         if (!line.empty() && line.back() == '\r') line.pop_back();
         auto c = splitLine(line);
         if (c.size() < 4) continue;
-        // Assuming: ID, Prio, PickLat(2), PickLng(3) ...
         coords.push_back({std::stod(c[2]), std::stod(c[3])});
+        hold = {std::stod(c[4]), std::stod(c[5])};
     }
 
     // 2. Parse Vehicles (Current Locations)
@@ -62,11 +64,24 @@ json generate_matrix_file(const std::string& empData, const std::string& vehData
         if (!line.empty() && line.back() == '\r') line.pop_back();
         auto c = splitLine(line);
         if (c.size() < 8) continue;
-        // Assuming: ID... CurLat(6), CurLng(7)
         coords.push_back({std::stod(c[6]), std::stod(c[7])});
     }
 
-    // 3. Construct URL
+
+    // 3. Parse Ofice (final location)
+
+    coords.push_back(hold);
+
+
+    // std::stringstream offSS(empData);
+    // std::getline(empSS, line);
+    // std::getline(empSS, line);
+    // auto c = splitLine(line);
+    // std::cerr << "\n\n\n\n\n\n\n\n\\n";
+    // coords.push_back({std::stod(c[4]), std::stod(c[5])}); 
+    // std::cerr << c[4] << " " << c[5] << std::endl;
+
+    // 4. Construct URL
     if (coords.empty()) {
         result["status"] = "error";
         result["message"] = "No coordinates found in CSVs";
@@ -95,7 +110,7 @@ json generate_matrix_file(const std::string& empData, const std::string& vehData
         return result;
     }
 
-    // 5. Parse JSON and Write Simple Text File
+    // 5. Parse JSON, Write File, AND Fill Vector
     std::ifstream jsonFile("osrm_raw.json");
     json j;
     try {
@@ -103,23 +118,35 @@ json generate_matrix_file(const std::string& empData, const std::string& vehData
         if (!j.contains("distances")) throw std::runtime_error("No distances in OSRM response");
 
         std::ofstream txtOut("matrix.txt");
-        auto matrix = j["distances"];
+        auto matrixJson = j["distances"];
         
-        // Write dimensions first
-        txtOut << matrix.size() << " " << matrix[0].size() << "\n";
+        // Clear internal vector to be safe
+        outMatrix.clear();
 
-        for (const auto &row : matrix) {
+        // Write dimensions to file
+        txtOut << matrixJson.size() << " " << matrixJson[0].size() << "\n";
+
+        for (const auto &row : matrixJson) {
+            std::vector<double> rowVec;
             for (const auto &val : row) {
-                txtOut << (val.get<double>() / 1000.0) << " "; // Convert to KM
+                double km = val.get<double>() / 1000.0; // Convert to KM
+                
+                // Write to File
+                txtOut << km << " ";
+                
+                // Add to In-Memory Vector
+                rowVec.push_back(km);
             }
             txtOut << "\n";
+            outMatrix.push_back(rowVec);
         }
         txtOut.close();
         
         result["status"] = "success";
         {
             std::lock_guard<std::mutex> lock(log_mutex);
-            std::cout << "[Backend] Matrix saved to 'matrix.txt'" << std::endl;
+            std::cout << "[Backend] Matrix processed. Size: " << outMatrix.size() << "x" 
+                      << (outMatrix.empty() ? 0 : outMatrix[0].size()) << std::endl;
         }
 
     } catch (std::exception& e) {
@@ -140,7 +167,6 @@ struct SolverResult {
 SolverResult run_solver(std::string folder, std::string execName, std::string args) {
     SolverResult res;
     
-    // Command: cd [folder] && ./[exec] [args] > log.txt
     std::string logFile = "run_log.txt";
     std::string command = "cd " + folder + " && ./" + execName + " " + args + " > " + logFile;
 
@@ -176,33 +202,34 @@ int main() {
 
         std::string empData, vehData, metaData, baseData;
 
-        // 1. Safe File Extraction (using .find, NOT .at)
-        auto emp_it = msg.part_map.find("file_employees.csv");
-        if (emp_it != msg.part_map.end()) empData = emp_it->second.body;
+        // // 1. Safe File Extraction
+        // auto emp_it = msg.part_map.find("employee.csv");
+        // if (emp_it != msg.part_map.end()) empData = emp_it->second.body;
 
-        auto veh_it = msg.part_map.find("file_vehicles.csv");
-        if (veh_it != msg.part_map.end()) vehData = veh_it->second.body;
+        // auto veh_it = msg.part_map.find("vehicles.csv");
+        // if (veh_it != msg.part_map.end()) vehData = veh_it->second.body;
 
-        auto meta_it = msg.part_map.find("file_meta.csv");
-        if (meta_it != msg.part_map.end()) metaData = meta_it->second.body;
+        // auto meta_it = msg.part_map.find("metadata.csv");
+        // if (meta_it != msg.part_map.end()) metaData = meta_it->second.body;
 
-        auto base_it = msg.part_map.find("file_baseline.csv");
-        if (base_it != msg.part_map.end()) baseData = base_it->second.body;
+        // auto base_it = msg.part_map.find("baseline.csv");
+        // if (base_it != msg.part_map.end()) baseData = base_it->second.body;
+        
+        
+        // if (empData.empty() || vehData.empty() || metaData.empty() || baseData.empty()) {
+        //     return crow::response(400, "Missing one of the 4 CSVs.");
+        // }
 
-        // Check if ANY required file is missing
-        if (empData.empty() || vehData.empty() || metaData.empty() || baseData.empty()) {
-            return crow::response(400, "Missing one of the 4 CSVs (employees, vehicles, meta, or baseline).");
-        }
+        // 2. Save Raw Inputs
+        saveFile("fvehicles.csv", vehData);
+        saveFile("femployees.csv", empData);
+        saveFile("fmetadata.csv", metaData);
+        saveFile("fbaseline.csv", baseData);
 
-        // 2. Save Raw Inputs to Root
-        saveFile("vehicles.csv", vehData);
-        saveFile("employees.csv", empData);
-        saveFile("metadata.csv", metaData);
-        saveFile("baseline.csv", baseData);
-
-        // 3. GENERATE MATRIX (Sequential)
-        // We use the vehicles and employees data to query OSRM
-        json matrix_status = generate_matrix_file(empData, vehData);
+        // 3. GENERATE MATRIX (File + Vector)
+        Matrix internal_matrix; // This will hold your matrix in C++ memory
+        
+        json matrix_status = generate_matrix_file(readFile("./employees.csv"), readFile("./vehicles.csv"), internal_matrix);
         
         if (matrix_status["status"] == "error") {
             return crow::response(500, "Matrix Calculation Failed: " + matrix_status["message"].get<std::string>());
@@ -210,17 +237,22 @@ int main() {
 
         // 4. RUN ALGORITHMS (Parallel)
         // ARGUMENT ORDER: vehicles -> employees -> metadata -> baseline -> matrix
-        std::string args = "../vehicles.csv ../employees.csv ../metadata.csv ../baseline.csv ../matrix.txt";
+        std::string args = "../vehicles.csv ../employees.csv ../metadata.csv ../matrix.txt";
         
-        SolverResult alns_res, bac_res;
+        SolverResult alns_res, bac_res, crds_res, hd_res, vnsk_res;
         
-        // Launch threads
         std::thread t1([&](){ alns_res = run_solver("ALNS", "main_ALNS", args); });
-        std::thread t2([&](){ bac_res = run_solver("Branch-And-Cut", "main_BAC", args); });
+        // std::thread t2([&](){ bac_res = run_solver("Branch-And-Cut", "main_BAC", args); });
+        std::thread t3([&](){ crds_res = run_solver("Clustering-Routing-DP-Solver", "main", args); });
+        std::thread t4([&](){ hd_res = run_solver("Heterogeneous_DARP", "hetero", args); });
+        std::thread t5([&](){ vnsk_res = run_solver("Variable_Neighbourhood_Search-KRITI", "main", args); });
 
-        // Wait for both
         t1.join();
-        t2.join();
+        // t2.join();
+        t3.join();
+        t4.join();
+        t5.join();
+        
 
         // 5. Build Response
         json response;
@@ -234,11 +266,32 @@ int main() {
             {"csv_employee", alns_res.output_employee}
         };
 
-        response["results"]["BAC"] = {
-            {"status", bac_res.status},
-            {"logs", bac_res.logs},
-            {"csv_vehicle", bac_res.output_vehicle},
-            {"csv_employee", bac_res.output_employee}
+        // response["results"]["BAC"] = {
+        //     {"status", bac_res.status},
+        //     {"logs", bac_res.logs},
+        //     {"csv_vehicle", bac_res.output_vehicle},
+        //     {"csv_employee", bac_res.output_employee}
+        // };
+
+        response["results"]["CRDS"] = {
+            {"status", crds_res.status},
+            {"logs", crds_res.logs},
+            {"csv_vehicle", crds_res.output_vehicle},
+            {"csv_employee", crds_res.output_employee}
+        };
+
+        response["results"]["HD"] = {
+            {"status", hd_res.status},
+            {"logs", hd_res.logs},
+            {"csv_vehicle", hd_res.output_vehicle},
+            {"csv_employee", hd_res.output_employee}
+        };
+
+        response["results"]["VNSK"] = {
+            {"status", vnsk_res.status},
+            {"logs", vnsk_res.logs},
+            {"csv_vehicle", vnsk_res.output_vehicle},
+            {"csv_employee", vnsk_res.output_employee}
         };
 
         crow::response res(200, response.dump());
@@ -247,6 +300,6 @@ int main() {
         return res;
     });
 
-    std::cout << "Server running on port 18080..." << std::endl;
-    app.port(18080).multithreaded().run();
+    std::cout << "Server running on port 5555..." << std::endl;
+    app.port(5555).multithreaded().run();
 }
