@@ -1,0 +1,14 @@
+Metadata Loaded: Cost Weight=0.7, Time Weight=0.3
+Loaded 3 vehicles from ../fvehicles.csv
+Loaded 8 employees from ../femployees.csv
+Distance matrix loaded: 16 x 16
+=============================================================
+FINAL METRICS CLustering-DP-Routing
+=============================================================
+Total Distance: 0 km
+Total Passenger Time: 0 min
+Total Monetary Cost: 0
+WEIGHTED OBJECTIVE: 0
+=============================================================
+
+CSV Files Generated.

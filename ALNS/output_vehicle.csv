@@ -1,0 +1,9 @@
+vehicle_id,category,employee_id,pickup_time,drop_time
+V01,premium,E06,08:15,08:25
+V01,premium,E01,08:30,08:36
+V01,premium,E08,10:00,10:09
+V01,premium,E05,10:08,10:09
+V02,normal,E07,09:30,09:41
+V02,normal,E03,09:35,09:41
+V03,normal,E04,08:30,08:50
+V03,normal,E02,08:45,08:50

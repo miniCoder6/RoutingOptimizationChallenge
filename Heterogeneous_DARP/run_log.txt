@@ -1,7 +1,7 @@
-Loading metadata from ../metadata.csv...
+Loading metadata from ../fmetadata.csv...
 Loading data...
-Loaded 3 vehicles from ../vehicles.csv
-Loaded 8 requests from ../employees.csv
+Loaded 3 vehicles from ../fvehicles.csv
+Loaded 8 requests from ../femployees.csv
 Loading matrix from ../matrix.txt (Expecting 12x12)...
 Matrix loaded successfully (12x12).
 === Running VNS Solver ===
@@ -9,4 +9,4 @@ Final Objective: 501.8
 Iterations: 2000
 Generating CSV files...
 Successfully created 'output_employees.csv' and 'output_vehicle.csv'
-Total Execution Time: 16.82 seconds
+Total Execution Time: 23.18 seconds

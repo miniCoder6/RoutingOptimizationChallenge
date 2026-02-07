@@ -202,34 +202,34 @@ int main() {
 
         std::string empData, vehData, metaData, baseData;
 
-        // // 1. Safe File Extraction
-        // auto emp_it = msg.part_map.find("employee.csv");
-        // if (emp_it != msg.part_map.end()) empData = emp_it->second.body;
+        // 1. Safe File Extraction
+        auto emp_it = msg.part_map.find("employees");
+        if (emp_it != msg.part_map.end()) empData = emp_it->second.body;
 
-        // auto veh_it = msg.part_map.find("vehicles.csv");
-        // if (veh_it != msg.part_map.end()) vehData = veh_it->second.body;
+        auto veh_it = msg.part_map.find("vehicles");
+        if (veh_it != msg.part_map.end()) vehData = veh_it->second.body;
 
-        // auto meta_it = msg.part_map.find("metadata.csv");
-        // if (meta_it != msg.part_map.end()) metaData = meta_it->second.body;
+        auto meta_it = msg.part_map.find("metadata");
+        if (meta_it != msg.part_map.end()) metaData = meta_it->second.body;
 
-        // auto base_it = msg.part_map.find("baseline.csv");
+        // auto base_it = msg.part_map.find("baseline");
         // if (base_it != msg.part_map.end()) baseData = base_it->second.body;
         
         
-        // if (empData.empty() || vehData.empty() || metaData.empty() || baseData.empty()) {
-        //     return crow::response(400, "Missing one of the 4 CSVs.");
-        // }
+        if (empData.empty() || vehData.empty() || metaData.empty()) {
+            return crow::response(400, "Missing one of the 3 CSVs.");
+        }
 
         // 2. Save Raw Inputs
         saveFile("fvehicles.csv", vehData);
         saveFile("femployees.csv", empData);
         saveFile("fmetadata.csv", metaData);
-        saveFile("fbaseline.csv", baseData);
+        // saveFile("fbaseline.csv", baseData);
 
         // 3. GENERATE MATRIX (File + Vector)
         Matrix internal_matrix; // This will hold your matrix in C++ memory
         
-        json matrix_status = generate_matrix_file(readFile("./employees.csv"), readFile("./vehicles.csv"), internal_matrix);
+        json matrix_status = generate_matrix_file(empData, vehData, internal_matrix);
         
         if (matrix_status["status"] == "error") {
             return crow::response(500, "Matrix Calculation Failed: " + matrix_status["message"].get<std::string>());
@@ -237,21 +237,21 @@ int main() {
 
         // 4. RUN ALGORITHMS (Parallel)
         // ARGUMENT ORDER: vehicles -> employees -> metadata -> baseline -> matrix
-        std::string args = "../vehicles.csv ../employees.csv ../metadata.csv ../matrix.txt";
+        std::string args = "../fvehicles.csv ../femployees.csv ../fmetadata.csv ../matrix.txt";
         
         SolverResult alns_res, bac_res, crds_res, hd_res, vnsk_res;
         
         std::thread t1([&](){ alns_res = run_solver("ALNS", "main_ALNS", args); });
         // std::thread t2([&](){ bac_res = run_solver("Branch-And-Cut", "main_BAC", args); });
-        std::thread t3([&](){ crds_res = run_solver("Clustering-Routing-DP-Solver", "main", args); });
+        std::thread t3([&](){ crds_res = run_solver("Clustering-Routing-DP-Solver", "crdp", args); });
         std::thread t4([&](){ hd_res = run_solver("Heterogeneous_DARP", "hetero", args); });
-        std::thread t5([&](){ vnsk_res = run_solver("Variable_Neighbourhood_Search-KRITI", "main", args); });
+        // std::thread t5([&](){ vnsk_res = run_solver("Variable_Neighbourhood_Search-KRITI", "main_vns", args); });
 
         t1.join();
         // t2.join();
         t3.join();
         t4.join();
-        t5.join();
+        // t5.join();
         
 
         // 5. Build Response
@@ -287,12 +287,12 @@ int main() {
             {"csv_employee", hd_res.output_employee}
         };
 
-        response["results"]["VNSK"] = {
-            {"status", vnsk_res.status},
-            {"logs", vnsk_res.logs},
-            {"csv_vehicle", vnsk_res.output_vehicle},
-            {"csv_employee", vnsk_res.output_employee}
-        };
+        // response["results"]["VNSK"] = {
+        //     {"status", vnsk_res.status},
+        //     {"logs", vnsk_res.logs},
+        //     {"csv_vehicle", vnsk_res.output_vehicle},
+        //     {"csv_employee", vnsk_res.output_employee}
+        // };
 
         crow::response res(200, response.dump());
         res.add_header("Access-Control-Allow-Origin", "*");

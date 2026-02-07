@@ -2,7 +2,7 @@
 CXX      = g++
 CXXFLAGS = -std=c++11 -Wall -O2
 TARGET   = main_vns
-SRC      = main_vns.cpp
+SRC      = main_vns.cpp matrix.cpp
 
 # --- Targets ---
 
