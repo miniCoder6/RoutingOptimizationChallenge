@@ -11,6 +11,7 @@
 #include <unordered_map>
 #include <functional>
 #include <queue>
+#include <climits>
 // std::mt19937_64 RNG(std::chrono::steady_clock::now().time_since_epoch().count());
 
 Solver::Solver(const std::vector<Request> &r, const std::vector<Vehicle> &v, GraphBuilder &gb)
@@ -336,15 +337,15 @@ Solver::Solution Solver::solveDeterministicAnnealing()
     double T = t_max;
 
     double initial_t = avg_cost * 0.5;
-    // double TT = initial_t;
-    double TT = 100.0;
+    double TT = initial_t;
+    // double TT = 100.0;
     double FT = 0.05;
 
     int iter_per_temp = 10;
     double total_cooling_steps = (double)max_iterations / iter_per_temp;
 
-    // double alpha = std::pow(FT / initial_t, 1.0 / total_cooling_steps);
-    double alpha = 1;
+    double alpha = std::pow(FT / initial_t, 1.0 / total_cooling_steps);
+    // double alpha = 1;
     int reheat_interval = 2000;
 
     int no_improve_global = 0;
@@ -440,8 +441,8 @@ Solver::Solution Solver::solveDeterministicAnnealing()
         if (no_improve_global > reheat_interval)
         {
             current_sol = best_sol;
-            // TT = initial_t * 0.15;
-            TT = initial_t;
+            TT = initial_t * 0.15;
+            // TT = initial_t;
             no_improve_global = 0;
         }
     }
@@ -903,248 +904,248 @@ double Solver::calculateAverageEdgeCost()
 
 // --- GRAPH MATCHING + CAPACITY AWARE INITIAL SOLUTION ---
 // --- GRAPH MATCHING + CAPACITY + SHARING AWARE INITIAL SOLUTION ---
-void Solver::buildGraphMatchingInitialSolution(Solution &sol)
-{
-    sol.routes.clear();
-    sol.unserved_requests.clear();
+// void Solver::buildGraphMatchingInitialSolution(Solution &sol)
+// {
+//     sol.routes.clear();
+//     sol.unserved_requests.clear();
 
-    int N = requests.size();
-    int V = vehicles.size();
+//     int N = requests.size();
+//     int V = vehicles.size();
 
-    // 1️⃣ Initialize empty routes
-    for (const auto &veh : vehicles)
-    {
-        sol.routes[veh.id] = {
-            1 + (veh.id - 1),
-            graph.n + 1 + (veh.id - 1)};
-    }
+//     // 1️⃣ Initialize empty routes
+//     for (const auto &veh : vehicles)
+//     {
+//         sol.routes[veh.id] = {
+//             1 + (veh.id - 1),
+//             graph.n + 1 + (veh.id - 1)};
+//     }
 
-    if (N == 0)
-    {
-        sol.total_cost = 0;
-        return;
-    }
+//     if (N == 0)
+//     {
+//         sol.total_cost = 0;
+//         return;
+//     }
 
-    // 2️⃣ Build compatibility graph between requests
-    std::vector<std::vector<int>> adj(N);
+//     // 2️⃣ Build compatibility graph between requests
+//     std::vector<std::vector<int>> adj(N);
 
-    for (int i = 0; i < N; ++i)
-    {
-        int p_i = graph.getPickupNodeId(i);
-        int d_i = graph.getDeliveryNodeId(i);
+//     for (int i = 0; i < N; ++i)
+//     {
+//         int p_i = graph.getPickupNodeId(i);
+//         int d_i = graph.getDeliveryNodeId(i);
 
-        const Node &pickup_i = graph.nodes[p_i];
-        const Node &delivery_i = graph.nodes[d_i];
+//         const Node &pickup_i = graph.nodes[p_i];
+//         const Node &delivery_i = graph.nodes[d_i];
 
-        for (int j = 0; j < N; ++j)
-        {
-            if (i == j)
-                continue;
+//         for (int j = 0; j < N; ++j)
+//         {
+//             if (i == j)
+//                 continue;
 
-            int p_j = graph.getPickupNodeId(j);
-            const Node &pickup_j = graph.nodes[p_j];
+//             int p_j = graph.getPickupNodeId(j);
+//             const Node &pickup_j = graph.nodes[p_j];
 
-            // travel time from delivery_i (OFFICE) to pickup_j
-            std::string from = delivery_i.getMatrixId(requests, vehicles);
-            std::string to = pickup_j.getMatrixId(requests, vehicles);
+//             // travel time from delivery_i (OFFICE) to pickup_j
+//             std::string from = delivery_i.getMatrixId(requests, vehicles);
+//             std::string to = pickup_j.getMatrixId(requests, vehicles);
 
-            double dist = getDistanceFromMatrix(from, to);
-            double speed = vehicles[0].avg_speed_kmh > 0 ? vehicles[0].avg_speed_kmh : 30.0;
+//             double dist = getDistanceFromMatrix(from, to);
+//             double speed = vehicles[0].avg_speed_kmh > 0 ? vehicles[0].avg_speed_kmh : 30.0;
 
-            double travel_time = (dist / speed) * 60.0;
+//             double travel_time = (dist / speed) * 60.0;
 
-            double finish_i = std::max(
-                                  (double)delivery_i.earliest_time,
-                                  (double)pickup_i.earliest_time) +
-                              delivery_i.service_duration + travel_time;
+//             double finish_i = std::max(
+//                                   (double)delivery_i.earliest_time,
+//                                   (double)pickup_i.earliest_time) +
+//                               delivery_i.service_duration + travel_time;
 
-            if (finish_i <= pickup_j.latest_time)
-            {
-                adj[i].push_back(j);
-            }
-        }
-    }
+//             if (finish_i <= pickup_j.latest_time)
+//             {
+//                 adj[i].push_back(j);
+//             }
+//         }
+//     }
 
-    // 3️⃣ Hopcroft–Karp Maximum Matching
-    std::vector<int> matchL(N, -1), matchR(N, -1), dist(N);
+//     // 3️⃣ Hopcroft–Karp Maximum Matching
+//     std::vector<int> matchL(N, -1), matchR(N, -1), dist(N);
 
-    std::function<bool()> bfs = [&]()
-    {
-        std::queue<int> q;
+//     std::function<bool()> bfs = [&]()
+//     {
+//         std::queue<int> q;
 
-        for (int i = 0; i < N; i++)
-        {
-            if (matchL[i] < 0)
-            {
-                dist[i] = 0;
-                q.push(i);
-            }
-            else
-            {
-                dist[i] = -1;
-            }
-        }
+//         for (int i = 0; i < N; i++)
+//         {
+//             if (matchL[i] < 0)
+//             {
+//                 dist[i] = 0;
+//                 q.push(i);
+//             }
+//             else
+//             {
+//                 dist[i] = -1;
+//             }
+//         }
 
-        bool found = false;
+//         bool found = false;
 
-        while (!q.empty())
-        {
-            int u = q.front();
-            q.pop();
+//         while (!q.empty())
+//         {
+//             int u = q.front();
+//             q.pop();
 
-            for (int v : adj[u])
-            {
-                int nxt = matchR[v];
+//             for (int v : adj[u])
+//             {
+//                 int nxt = matchR[v];
 
-                if (nxt >= 0 && dist[nxt] < 0)
-                {
-                    dist[nxt] = dist[u] + 1;
-                    q.push(nxt);
-                }
+//                 if (nxt >= 0 && dist[nxt] < 0)
+//                 {
+//                     dist[nxt] = dist[u] + 1;
+//                     q.push(nxt);
+//                 }
 
-                if (nxt < 0)
-                    found = true;
-            }
-        }
-        return found;
-    };
+//                 if (nxt < 0)
+//                     found = true;
+//             }
+//         }
+//         return found;
+//     };
 
-    std::function<bool(int)> dfs = [&](int u)
-    {
-        for (int v : adj[u])
-        {
-            int nxt = matchR[v];
+//     std::function<bool(int)> dfs = [&](int u)
+//     {
+//         for (int v : adj[u])
+//         {
+//             int nxt = matchR[v];
 
-            if (nxt < 0 || (dist[nxt] == dist[u] + 1 && dfs(nxt)))
-            {
-                matchL[u] = v;
-                matchR[v] = u;
-                return true;
-            }
-        }
+//             if (nxt < 0 || (dist[nxt] == dist[u] + 1 && dfs(nxt)))
+//             {
+//                 matchL[u] = v;
+//                 matchR[v] = u;
+//                 return true;
+//             }
+//         }
 
-        dist[u] = -1;
-        return false;
-    };
+//         dist[u] = -1;
+//         return false;
+//     };
 
-    while (bfs())
-    {
-        for (int i = 0; i < N; i++)
-            if (matchL[i] < 0)
-                dfs(i);
-    }
+//     while (bfs())
+//     {
+//         for (int i = 0; i < N; i++)
+//             if (matchL[i] < 0)
+//                 dfs(i);
+//     }
 
-    // 4️⃣ Extract chains (minimum path cover)
-    std::vector<bool> hasPrev(N, false);
+//     // 4️⃣ Extract chains (minimum path cover)
+//     std::vector<bool> hasPrev(N, false);
 
-    for (int i = 0; i < N; ++i)
-        if (matchL[i] != -1)
-            hasPrev[matchL[i]] = true;
+//     for (int i = 0; i < N; ++i)
+//         if (matchL[i] != -1)
+//             hasPrev[matchL[i]] = true;
 
-    std::vector<std::vector<int>> chains;
+//     std::vector<std::vector<int>> chains;
 
-    for (int i = 0; i < N; ++i)
-    {
-        if (!hasPrev[i])
-        {
-            std::vector<int> chain;
-            int curr = i;
+//     for (int i = 0; i < N; ++i)
+//     {
+//         if (!hasPrev[i])
+//         {
+//             std::vector<int> chain;
+//             int curr = i;
 
-            chain.push_back(curr);
+//             chain.push_back(curr);
 
-            while (matchL[curr] != -1)
-            {
-                curr = matchL[curr];
-                chain.push_back(curr);
-            }
+//             while (matchL[curr] != -1)
+//             {
+//                 curr = matchL[curr];
+//                 chain.push_back(curr);
+//             }
 
-            chains.push_back(chain);
-        }
-    }
+//             chains.push_back(chain);
+//         }
+//     }
 
-    // 5️⃣ Assign chains to vehicles
-    int chain_count = std::min((int)chains.size(), V);
+//     // 5️⃣ Assign chains to vehicles
+//     int chain_count = std::min((int)chains.size(), V);
 
-    for (int c = 0; c < chain_count; ++c)
-    {
-        int veh_id = vehicles[c].id;
-        int veh_idx = veh_id - 1;
+//     for (int c = 0; c < chain_count; ++c)
+//     {
+//         int veh_id = vehicles[c].id;
+//         int veh_idx = veh_id - 1;
 
-        auto &route = sol.routes[veh_id];
+//         auto &route = sol.routes[veh_id];
 
-        int current_load = 0;
-        int capacity = vehicles[veh_idx].max_capacity;
+//         int current_load = 0;
+//         int capacity = vehicles[veh_idx].max_capacity;
 
-        std::vector<int> active_passengers;
+//         std::vector<int> active_passengers;
 
-        for (int req_idx : chains[c])
-        {
-            int p = graph.getPickupNodeId(req_idx);
-            int d = graph.getDeliveryNodeId(req_idx);
+//         for (int req_idx : chains[c])
+//         {
+//             int p = graph.getPickupNodeId(req_idx);
+//             int d = graph.getDeliveryNodeId(req_idx);
 
-            // If vehicle full → deliver all
-            if (current_load == capacity)
-            {
-                for (int r : active_passengers)
-                {
-                    int dnode = graph.getDeliveryNodeId(r);
-                    route.insert(route.end() - 1, dnode);
-                }
+//             // If vehicle full → deliver all
+//             if (current_load == capacity)
+//             {
+//                 for (int r : active_passengers)
+//                 {
+//                     int dnode = graph.getDeliveryNodeId(r);
+//                     route.insert(route.end() - 1, dnode);
+//                 }
 
-                active_passengers.clear();
-                current_load = 0;
-            }
+//                 active_passengers.clear();
+//                 current_load = 0;
+//             }
 
-            // Pickup
-            route.insert(route.end() - 1, p);
-            active_passengers.push_back(req_idx);
-            current_load++;
+//             // Pickup
+//             route.insert(route.end() - 1, p);
+//             active_passengers.push_back(req_idx);
+//             current_load++;
 
-            // Enforce sharing constraint
-            int min_allowed_load = INT_MAX;
+//             // Enforce sharing constraint
+//             int min_allowed_load = INT_MAX;
 
-            for (int r : active_passengers)
-            {
-                min_allowed_load = std::min(
-                    min_allowed_load,
-                    requests[r].max_shared_with + 1);
-            }
+//             for (int r : active_passengers)
+//             {
+//                 min_allowed_load = std::min(
+//                     min_allowed_load,
+//                     requests[r].max_shared_with + 1);
+//             }
 
-            if (current_load > min_allowed_load)
-            {
-                int r = active_passengers.front();
-                int dnode = graph.getDeliveryNodeId(r);
+//             if (current_load > min_allowed_load)
+//             {
+//                 int r = active_passengers.front();
+//                 int dnode = graph.getDeliveryNodeId(r);
 
-                route.insert(route.end() - 1, dnode);
+//                 route.insert(route.end() - 1, dnode);
 
-                active_passengers.erase(active_passengers.begin());
-                current_load--;
-            }
-        }
+//                 active_passengers.erase(active_passengers.begin());
+//                 current_load--;
+//             }
+//         }
 
-        // Deliver remaining passengers
-        for (int r : active_passengers)
-        {
-            int dnode = graph.getDeliveryNodeId(r);
-            route.insert(route.end() - 1, dnode);
-        }
+//         // Deliver remaining passengers
+//         for (int r : active_passengers)
+//         {
+//             int dnode = graph.getDeliveryNodeId(r);
+//             route.insert(route.end() - 1, dnode);
+//         }
 
-        // Final feasibility check
-        if (!checker.runEightStepEvaluation(route, veh_idx))
-        {
-            for (int r : chains[c])
-                sol.unserved_requests.push_back(r);
+//         // Final feasibility check
+//         if (!checker.runEightStepEvaluation(route, veh_idx))
+//         {
+//             for (int r : chains[c])
+//                 sol.unserved_requests.push_back(r);
 
-            route = {
-                1 + (veh_id - 1),
-                graph.n + 1 + (veh_id - 1)};
-        }
-    }
+//             route = {
+//                 1 + (veh_id - 1),
+//                 graph.n + 1 + (veh_id - 1)};
+//         }
+//     }
 
-    // Mark overflow chains as unserved
-    for (int i = V; i < (int)chains.size(); ++i)
-        for (int r : chains[i])
-            sol.unserved_requests.push_back(r);
+//     // Mark overflow chains as unserved
+//     for (int i = V; i < (int)chains.size(); ++i)
+//         for (int r : chains[i])
+//             sol.unserved_requests.push_back(r);
 
-    sol.total_cost = calculateTotalCost(sol);
-}
+//     sol.total_cost = calculateTotalCost(sol);
+// }

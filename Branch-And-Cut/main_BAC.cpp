@@ -10,6 +10,9 @@
 #include <random>
 #include <fstream>
 #include <unordered_map>
+#include <filesystem>
+
+namespace fs = std::filesystem;
 
 #include "globals.h"
 #include "structures.h"
@@ -78,7 +81,8 @@ void printSolution(const Solver::Solution &sol,
                    const std::vector<Request> &requests,
                    GraphBuilder &gb,
                    double dist_weight, // Used as a multiplier for money (usually 1.0)
-                   double time_weight) // Used as a multiplier for time (usually 0.0)
+                   double time_weight,
+                   fs::path base_dir) // Used as a multiplier for time (usually 0.0)
 {
     std::cout << "\n=============================================================\n";
     std::cout << "                  OPTIMIZED SCHEDULE SUMMARY\n";
@@ -298,14 +302,16 @@ void printSolution(const Solver::Solution &sol,
 
     // Write CSVs (same as before) ...
     {
-        std::ofstream fout("output_vehicle.csv");
+        fs::path veh_out_path = base_dir / "Branch-And-Cut/output_vehicle.csv";
+        std::ofstream fout(veh_out_path);
         fout << "vehicle_id,category,employee_id,pickup_time,drop_time\n";
         for (auto &r : vehicle_csv_rows)
             fout << r.vehicle_id << "," << r.category << "," << r.employee_id << "," << r.pickup_time << "," << r.drop_time << "\n";
         fout.close();
     }
     {
-        std::ofstream fout("output_employees.csv");
+        fs::path emp_out_path = base_dir / "Branch-And-Cut/output_employees.csv";
+        std::ofstream fout(emp_out_path);
         fout << "employee_id,pickup_time,drop_time\n";
         for (auto &r : employee_csv_rows)
             fout << r.employee_id << "," << r.pickup_time << "," << r.drop_time << "\n";
@@ -498,31 +504,51 @@ void loadMetadata(const std::string &filename, std::map<int, int> &delays, doubl
 
 int main(int argc, char **argv)
 {
+    if (argc < 2)
+    {
+        std::cerr << "Usage: " << argv[0] << " <base_directory>\n";
+        return 1;
+    }
+
     std::srand(std::time(nullptr));
     std::map<int, int> priority_delays = {{1, 10}, {2, 20}, {3, 30}, {4, 45}, {5, 60}};
     double dist_cost = 1.0;
     double time_cost = 0.0;
+
+    fs::path base_dir = argv[1];
+
+    if (!fs::exists(base_dir))
+    {
+        std::cerr << "Error: Directory does not exist: " << base_dir << "\n";
+        return 1;
+    }
+
+    // 3. Define Input Paths (All inside base_dir)
+    fs::path metadata_path = base_dir / "metadata.csv";
+    fs::path vehicles_path = base_dir / "vehicles.csv";
+    fs::path employees_path = base_dir / "employees.csv";
+    fs::path matrix_path = base_dir / "matrix.txt";
 
     // std::string temp;
     // std::cout << "METADATA FILE NAME : ";
     // std::cin >> temp;
     // temp += ".csv";
     // loadMetadata(temp, priority_delays, dist_cost, time_cost);
-    loadMetadata(argv[3], priority_delays, dist_cost, time_cost);
+    loadMetadata(metadata_path.string(), priority_delays, dist_cost, time_cost);
 
     // --- 1. LOAD DATA FROM CSV ---
     // std::cout << "VEHICLES FILE NAME : ";
     // std::cin >> temp;
     // temp += ".csv";
-    std::vector<Vehicle> vehicles = loadVehicles(argv[1]); // loadVehicles(temp);
+    std::vector<Vehicle> vehicles = loadVehicles(vehicles_path.string()); // loadVehicles(temp);
     // std::cout << "EMPLOYEE FILE NAME : ";
     // std::cin >> temp;
     // temp += ".csv";
-    std::vector<Request> requests = loadRequests(argv[2], priority_delays); // loadRequests(temp, priority_delays);
+    std::vector<Request> requests = loadRequests(employees_path.string(), priority_delays); // loadRequests(temp, priority_delays);
 
     N = requests.size();
     V = vehicles.size();
-    loadMatrix(argv[4], N + V + 1);
+    loadMatrix(matrix_path.string(), N + V + 1);
     auto begin = std::chrono::high_resolution_clock::now();
 
     if (vehicles.empty() || requests.empty())
@@ -554,7 +580,7 @@ int main(int argc, char **argv)
 
     Solver::Solution solution = solver.solveDeterministicAnnealing();
 
-    printSolution(solution, vehicles, requests, graph, solver.dist_cost, solver.time_cost);
+    printSolution(solution, vehicles, requests, graph, solver.dist_cost, solver.time_cost, base_dir);
 
     auto end = std::chrono::high_resolution_clock::now();
     auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(end - begin);
