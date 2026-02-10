@@ -769,8 +769,8 @@ int main(int argc, char **argv)
 
     // CHANGED: No longer creating "Heterogeneous_DARP" folder.
     // Saving directly to the temp directory provided in argv[1].
-    fs::path emp_out_path = base_dir / "output_employees.csv";
-    fs::path veh_out_path = base_dir / "output_vehicle.csv";
+    fs::path emp_out_path = base_dir / "Heterogeneous_DARP/output_employees.csv";
+    fs::path veh_out_path = base_dir / "Heterogeneous_DARP/output_vehicle.csv";
 
     ofstream emp_file(emp_out_path);
     ofstream veh_file(veh_out_path);
