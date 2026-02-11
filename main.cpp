@@ -362,7 +362,7 @@ int main()
         res.add_header("Access-Control-Allow-Origin", "*");
         res.add_header("Content-Type", "application/json");
         return res; });
-
+        
     std::cout << "Server running on port 5555..." << std::endl;
     app.port(5555).multithreaded().run();
 }
