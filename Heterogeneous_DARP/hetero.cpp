@@ -449,7 +449,7 @@ public:
             if (!m.feasible)
                 all_routes_feasible = false;
         }
-        score += unassigned_requests.size() * 100000.0;
+        score += unassigned_requests.size() * 1000000.0;
         total_score = score;
         feasible = all_routes_feasible && unassigned_requests.empty();
     }
@@ -515,7 +515,7 @@ public:
                 cur.sequence = temp;
                 RouteMetrics m = cur.evaluate(vehicles, requests, config);
 
-                if (m.objective_score < base_score + 20000.0)
+                if (m.objective_score < base_score + 1000000.0)
                 {
                     if (m.objective_score < best_insertion_cost)
                     {
@@ -759,9 +759,24 @@ int main(int argc, char **argv)
     VNSSolver solver(requests, vehicles, config);
     int iterations_done = 0;
 
-    Solution final_solution = solver.solve(2000, iterations_done);
+    Solution final_solution = solver.solve(5000, iterations_done);
+    double final_base_obj = 0.0;
+    for (auto& r : final_solution.routes) {
+        if (r.served_employees.empty()) continue;
+        
+        // Re-evaluate to get the raw metrics (cost, time, etc.)
+        RouteMetrics m = r.evaluate(vehicles, requests, config);
+        
+        // Sum only cost and time weights (ignoring alpha, beta, gamma penalties)
+        final_base_obj += (config.cost_weight * m.total_cost) + (config.time_weight * m.total_time);
+    } 
 
-    cout << "Final Objective: " << fixed << setprecision(1) << final_solution.total_score << endl;
+    cout << "Final Objective: " << fixed << setprecision(1) << final_base_obj << endl;
+
+    cout << "Final Total Score (With Penalties): " << fixed << setprecision(1) << final_solution.total_score << endl;
+
+    cout << "Unassigned Employees: " << final_solution.unassigned_requests.size() << endl;
+
     cout << "Iterations: " << iterations_done << endl;
 
     // === 4. OUTPUT GENERATION (DIRECTLY IN TEMP DIR) ===
@@ -826,4 +841,5 @@ int main(int argc, char **argv)
     std::chrono::duration<double> elapsed = end_time - start_time;
     cout << "Total Execution Time: " << fixed << setprecision(2) << elapsed.count() << " seconds" << endl;
     return 0;
+
 }
