@@ -11,27 +11,27 @@
 #include <fstream>
 #include <sstream>
 #include <set>
-#include "matrix.h"
 
 using namespace std;
 
 // =================== CONFIGURATION ===================
 
+const double EARTH_RADIUS_KM = 6371.0;
+const double PI = 3.14159265358979323846;
 const double INF = 1e15;
 
-// Weights for objective function (will be loaded from metadata.csv)
+// These will be loaded from metadata.csv
 double OBJ_COST_WEIGHT = 0.7;
 double OBJ_TIME_WEIGHT = 0.3;
-
-// Priority delays (will be loaded from metadata.csv)
-map<int, int> PRIORITY_DELAYS = {{1, 5}, {2, 10}, {3, 15}, {4, 20}, {5, 30}};
+int PRIORITY_DELAY[6] = {30, 5, 10, 15, 20, 30}; // index 0 = default, 1-5 = priorities
 
 int getPriorityDelay(int priority) {
-    auto it = PRIORITY_DELAYS.find(priority);
-    if (it != PRIORITY_DELAYS.end())
-        return it->second;
-    return 30;
+    if (priority >= 1 && priority <= 5) return PRIORITY_DELAY[priority];
+    return PRIORITY_DELAY[0];
 }
+
+// Penalty multiplier for time window violations (from reference snippet)
+const double INFEASIBILITY_PENALTY = 10000.0;
 
 // =================== ENUMS & HELPERS ===================
 
@@ -56,6 +56,45 @@ string trim(const string& str) {
     if (first == string::npos) return "";
     size_t last = str.find_last_not_of(" \t\r\n");
     return str.substr(first, (last - first + 1));
+}
+
+// =================== METADATA READER ===================
+
+void readMetadata(const string& filename) {
+    ifstream file(filename);
+    if (!file.is_open()) {
+        cerr << "[WARN] Cannot open metadata file " << filename << ", using defaults." << endl;
+        return;
+    }
+
+    string line;
+    getline(file, line); // Skip header
+
+    map<string, string> meta;
+    while (getline(file, line)) {
+        stringstream ss(line);
+        string key, value;
+        getline(ss, key, ',');
+        getline(ss, value, ',');
+        meta[trim(key)] = trim(value);
+    }
+    file.close();
+
+    if (meta.count("priority_1_max_delay_min")) PRIORITY_DELAY[1] = stoi(meta["priority_1_max_delay_min"]);
+    if (meta.count("priority_2_max_delay_min")) PRIORITY_DELAY[2] = stoi(meta["priority_2_max_delay_min"]);
+    if (meta.count("priority_3_max_delay_min")) PRIORITY_DELAY[3] = stoi(meta["priority_3_max_delay_min"]);
+    if (meta.count("priority_4_max_delay_min")) PRIORITY_DELAY[4] = stoi(meta["priority_4_max_delay_min"]);
+    if (meta.count("priority_5_max_delay_min")) PRIORITY_DELAY[5] = stoi(meta["priority_5_max_delay_min"]);
+    PRIORITY_DELAY[0] = PRIORITY_DELAY[5]; // default = worst case
+
+    if (meta.count("objective_cost_weight")) OBJ_COST_WEIGHT = stod(meta["objective_cost_weight"]);
+    if (meta.count("objective_time_weight")) OBJ_TIME_WEIGHT = stod(meta["objective_time_weight"]);
+
+    cout << "[INFO] Metadata loaded from " << filename << endl;
+    cout << "  Priority delays: ";
+    for (int i = 1; i <= 5; i++) cout << "P" << i << "=" << PRIORITY_DELAY[i] << " ";
+    cout << endl;
+    cout << "  Weights: cost=" << OBJ_COST_WEIGHT << " time=" << OBJ_TIME_WEIGHT << endl;
 }
 
 // =================== DATA STRUCTURES ===================
@@ -87,24 +126,46 @@ struct Driver {
     string type_str;
 };
 
-// =================== DISTANCE MATRIX ACCESS ===================
+// =================== DISTANCE MATRIX ===================
 
-// Use the matrix from matrix.cpp instead of calculating Haversine
-double getDistPP(int i, int j, const vector<Person>& persons) {
-    return getDistanceFromMatrix(persons[i].original_id, persons[j].original_id);
+vector<vector<double>> distMatrix;
+
+double calculateHaversine(double lat1, double lon1, double lat2, double lon2) {
+    double dlat = (lat2 - lat1) * (PI / 180.0);
+    double dlon = (lon2 - lon1) * (PI / 180.0);
+    double a = sin(dlat / 2) * sin(dlat / 2) +
+               cos(lat1 * (PI / 180.0)) * cos(lat2 * (PI / 180.0)) * sin(dlon / 2) * sin(dlon / 2);
+    double c = 2 * atan2(sqrt(a), sqrt(1 - a));
+    return EARTH_RADIUS_KM * c;
 }
 
-double getDistPO(int i, const vector<Person>& persons) {
-    return getDistanceFromMatrix(persons[i].original_id, "OFFICE");
+void precomputeDistances(const vector<Person>& persons, const vector<Driver>& drivers) {
+    int N = persons.size();
+    int M = drivers.size();
+    int totalPoints = N + 1 + M;
+    
+    distMatrix.assign(totalPoints, vector<double>(totalPoints, 0.0));
+    
+    vector<pair<double, double>> coords;
+    for(const auto& p : persons) coords.push_back({p.p_lat, p.p_lng});
+    coords.push_back({persons[0].d_lat, persons[0].d_lng});
+    for(const auto& d : drivers) coords.push_back({d.start_lat, d.start_lng});
+
+    for(int i=0; i<totalPoints; i++) {
+        for(int j=0; j<totalPoints; j++) {
+            if (i == j) distMatrix[i][j] = 0;
+            else {
+                distMatrix[i][j] = calculateHaversine(coords[i].first, coords[i].second, 
+                                                      coords[j].first, coords[j].second);
+            }
+        }
+    }
 }
 
-double getDistVP(int k, int i, const vector<Driver>& drivers, const vector<Person>& persons) {
-    return getDistanceFromMatrix(drivers[k].original_id, persons[i].original_id);
-}
-
-double getDistOP(int i, const vector<Person>& persons) {
-    return getDistanceFromMatrix("OFFICE", persons[i].original_id);
-}
+double getDistPP(int i, int j) { return distMatrix[i][j]; }
+double getDistPO(int i, int n_emp) { return distMatrix[i][n_emp]; }
+double getDistVP(int k, int i, int n_emp) { return distMatrix[n_emp + 1 + k][i]; }
+double getDistOP(int i, int n_emp) { return distMatrix[n_emp][i]; }
 
 // =================== ALGORITHM CLASSES ===================
 
@@ -143,6 +204,7 @@ struct Label {
 void splitProcedure(Chromosome &chromo, const vector<Person> &persons, const vector<Driver> &drivers) {
     int N = persons.size();
     int M = drivers.size();
+    int OfficeIdx = N;
 
     vector<Label> V(N + 1);
     
@@ -185,10 +247,10 @@ void splitProcedure(Chromosome &chromo, const vector<Person> &persons, const vec
             if (prevCustIdx == -1) {
                 currentRouteDist = 0; 
             } else {
-                currentRouteDist += getDistPP(prevCustIdx, custIdx, persons);
+                currentRouteDist += getDistPP(prevCustIdx, custIdx);
             }
 
-            double distToOffice = getDistPO(custIdx, persons);
+            double distToOffice = getDistPO(custIdx, N);
             
             double bestTripCost = INF;
             int bestVehicle = -1;
@@ -212,9 +274,9 @@ void splitProcedure(Chromosome &chromo, const vector<Person> &persons, const vec
                 double distStartToFirst = 0;
                 
                 if (availTime == d.start_time) {
-                    distStartToFirst = getDistVP(k, firstCust, drivers, persons);
+                    distStartToFirst = getDistVP(k, firstCust, N);
                 } else {
-                    distStartToFirst = getDistOP(firstCust, persons);
+                    distStartToFirst = getDistOP(firstCust, N);
                 }
 
                 double totalDist = distStartToFirst + currentRouteDist + distToOffice;
@@ -227,11 +289,10 @@ void splitProcedure(Chromosome &chromo, const vector<Person> &persons, const vec
                 pickupTimes.push_back(currentVisTime);
 
                 int tempPrev = firstCust;
-                bool timeFeasible = true;
 
                 for(int p = i + 1; p < j; p++) {
                     int pIdx = chromo.giantTour[p];
-                    double legDist = getDistPP(tempPrev, pIdx, persons);
+                    double legDist = getDistPP(tempPrev, pIdx);
                     int legTime = ceil((legDist / d.speed_kmph) * 60);
                     
                     int arrival = currentVisTime + legTime;
@@ -245,27 +306,32 @@ void splitProcedure(Chromosome &chromo, const vector<Person> &persons, const vec
                 int travelToOffice = ceil((distToOffice / d.speed_kmph) * 60);
                 int arrivalAtOffice = currentVisTime + travelToOffice;
 
+                // ===== INFEASIBILITY PENALTY INSTEAD OF HARD REJECTION =====
+                double penalty = 0.0;
+
                 for(int p = i; p < j; p++) {
                     int pIdx = chromo.giantTour[p];
                     int idxInGroup = p - i;
                     int actualPickup = pickupTimes[idxInGroup];
-                    
+
+                    // Penalty for late drop-off violation
                     if (arrivalAtOffice > persons[pIdx].late_drop) {
-                        timeFeasible = false; break;
+                        long long violation = arrivalAtOffice - persons[pIdx].late_drop;
+                        penalty += INFEASIBILITY_PENALTY * violation;
                     }
 
+                    // Penalty for priority-based max delay violation
                     int actualRideTime = arrivalAtOffice - actualPickup;
-                    double directDist = getDistPO(pIdx, persons);
+                    double directDist = getDistPO(pIdx, N);
                     int directTime = ceil((directDist / d.speed_kmph) * 60);
                     int delay = actualRideTime - directTime;
                     int allowedDelay = getPriorityDelay(persons[pIdx].priority);
 
                     if (delay > allowedDelay) {
-                        timeFeasible = false; break;
+                        long long violation = delay - allowedDelay;
+                        penalty += INFEASIBILITY_PENALTY * violation;
                     }
                 }
-                
-                if (!timeFeasible) continue;
 
                 double totalPassengerRideTime = 0;
                 for(int p = i; p < j; p++) {
@@ -277,7 +343,7 @@ void splitProcedure(Chromosome &chromo, const vector<Person> &persons, const vec
                 }
                 
                 double monetaryCost = totalDist * d.cost_per_km;
-                double cost = (monetaryCost * OBJ_COST_WEIGHT) + (totalPassengerRideTime * OBJ_TIME_WEIGHT);
+                double cost = (monetaryCost * OBJ_COST_WEIGHT) + (totalPassengerRideTime * OBJ_TIME_WEIGHT) + penalty;
 
                 if (cost < bestTripCost) {
                     bestTripCost = cost;
@@ -377,6 +443,7 @@ struct SolutionMetrics {
 
 SolutionMetrics calculateDetailedMetrics(const Chromosome& best, const vector<Person>& persons, const vector<Driver>& drivers) {
     SolutionMetrics metrics = {0, 0, 0, 0, 0};
+    int N = persons.size();
     
     map<int, vector<Chromosome::Trip>> driverTrips;
     for(const auto& t : best.schedule) {
@@ -396,9 +463,9 @@ SolutionMetrics calculateDetailedMetrics(const Chromosome& best, const vector<Pe
             double legDist = 0;
             
             if (i == 0) {
-                legDist = getDistVP(vIdx, firstCust, drivers, persons);
+                legDist = getDistVP(vIdx, firstCust, N);
             } else {
-                legDist = getDistOP(firstCust, persons);
+                legDist = getDistOP(firstCust, N);
             }
             
             int travelTime = ceil((legDist / d.speed_kmph) * 60);
@@ -412,7 +479,7 @@ SolutionMetrics calculateDetailedMetrics(const Chromosome& best, const vector<Pe
 
             for(size_t k=1; k<trip.customers.size(); k++) {
                 int cIdx = trip.customers[k];
-                double dist = getDistPP(prevCust, cIdx, persons);
+                double dist = getDistPP(prevCust, cIdx);
                 int travel = ceil((dist / d.speed_kmph) * 60);
                 currentTime = max(currentTime + travel, persons[cIdx].early_pickup);
                 
@@ -421,7 +488,7 @@ SolutionMetrics calculateDetailedMetrics(const Chromosome& best, const vector<Pe
                 prevCust = cIdx;
             }
 
-            double toOffice = getDistPO(prevCust, persons);
+            double toOffice = getDistPO(prevCust, N);
             int travelOffice = ceil((toOffice / d.speed_kmph) * 60);
             int arrivalAtOffice = currentTime + travelOffice;
             metrics.totalDistance += toOffice;
@@ -437,24 +504,25 @@ SolutionMetrics calculateDetailedMetrics(const Chromosome& best, const vector<Pe
         metrics.totalDuration += (currentTime - vehicleStartTime);
     }
     
-    metrics.monetaryCost = 0;
+    metrics.monetaryCost = metrics.totalDistance * 0.0;
     for(auto& dt : driverTrips) {
         const Driver& d = drivers[dt.first];
         double vehDist = 0;
+        int currentTime = d.start_time;
         
         for(int i=0; i<dt.second.size(); i++) {
             auto& trip = dt.second[i];
             int firstCust = trip.customers[0];
-            double legDist = (i == 0) ? getDistVP(dt.first, firstCust, drivers, persons) : getDistOP(firstCust, persons);
+            double legDist = (i == 0) ? getDistVP(dt.first, firstCust, N) : getDistOP(firstCust, N);
             vehDist += legDist;
             
             int prevCust = firstCust;
             for(size_t k=1; k<trip.customers.size(); k++) {
                 int cIdx = trip.customers[k];
-                vehDist += getDistPP(prevCust, cIdx, persons);
+                vehDist += getDistPP(prevCust, cIdx);
                 prevCust = cIdx;
             }
-            vehDist += getDistPO(prevCust, persons);
+            vehDist += getDistPO(prevCust, N);
         }
         metrics.monetaryCost += vehDist * d.cost_per_km;
     }
@@ -578,48 +646,6 @@ vector<Person> readEmployeeCSV(const string& filename) {
     return persons;
 }
 
-void loadMetadata(const string& filename) {
-    ifstream file(filename);
-    if (!file.is_open()) {
-        cerr << "Warning: Could not open " << filename << ". Using defaults.\n";
-        return;
-    }
-    
-    string line;
-    getline(file, line); // Skip header
-    
-    while(getline(file, line)) {
-        if (line.empty()) continue;
-        
-        stringstream ss(line);
-        string key, valStr;
-        getline(ss, key, ',');
-        getline(ss, valStr, ',');
-        
-        // Clean strings
-        key.erase(remove(key.begin(), key.end(), '\r'), key.end());
-        valStr.erase(remove(valStr.begin(), valStr.end(), '\r'), valStr.end());
-        
-        if (key == "priority_1_max_delay_min")
-            PRIORITY_DELAYS[1] = stoi(valStr);
-        else if (key == "priority_2_max_delay_min")
-            PRIORITY_DELAYS[2] = stoi(valStr);
-        else if (key == "priority_3_max_delay_min")
-            PRIORITY_DELAYS[3] = stoi(valStr);
-        else if (key == "priority_4_max_delay_min")
-            PRIORITY_DELAYS[4] = stoi(valStr);
-        else if (key == "priority_5_max_delay_min")
-            PRIORITY_DELAYS[5] = stoi(valStr);
-        else if (key == "objective_cost_weight")
-            OBJ_COST_WEIGHT = stod(valStr);
-        else if (key == "objective_time_weight")
-            OBJ_TIME_WEIGHT = stod(valStr);
-    }
-    
-    cout << "[INFO] Metadata loaded: Cost Weight=" << OBJ_COST_WEIGHT 
-         << ", Time Weight=" << OBJ_TIME_WEIGHT << "\n";
-}
-
 map<string, int> buildEmployeeIdMap(const vector<Person>& persons) {
     map<string, int> empMap;
     for(const auto& p : persons) {
@@ -699,6 +725,8 @@ void writeCSVOutput(const string& filename, const Chromosome& solution, const ve
     
     file << "vehicle_id,category,employee_id,pickup_time,drop_time\n";
     
+    int N = persons.size();
+    
     map<int, vector<Chromosome::Trip>> driverTrips;
     for(const auto& t : solution.schedule) {
         driverTrips[t.vehicleIdx].push_back(t);
@@ -716,9 +744,9 @@ void writeCSVOutput(const string& filename, const Chromosome& solution, const ve
             double legDist = 0;
             
             if (i == 0) {
-                legDist = getDistVP(vIdx, firstCust, drivers, persons);
+                legDist = getDistVP(vIdx, firstCust, N);
             } else {
-                legDist = getDistOP(firstCust, persons);
+                legDist = getDistOP(firstCust, N);
             }
             
             int travelTime = ceil((legDist / d.speed_kmph) * 60);
@@ -730,7 +758,7 @@ void writeCSVOutput(const string& filename, const Chromosome& solution, const ve
             
             for(size_t k=1; k<trip.customers.size(); k++) {
                 int cIdx = trip.customers[k];
-                double dist = getDistPP(prevCust, cIdx, persons);
+                double dist = getDistPP(prevCust, cIdx);
                 int travel = ceil((dist / d.speed_kmph) * 60);
                 currentTime = max(currentTime + travel, persons[cIdx].early_pickup);
                 
@@ -738,7 +766,7 @@ void writeCSVOutput(const string& filename, const Chromosome& solution, const ve
                 prevCust = cIdx;
             }
             
-            double toOffice = getDistPO(prevCust, persons);
+            double toOffice = getDistPO(prevCust, N);
             int travelOffice = ceil((toOffice / d.speed_kmph) * 60);
             int arrivalAtOffice = currentTime + travelOffice;
             
@@ -760,63 +788,76 @@ void writeCSVOutput(const string& filename, const Chromosome& solution, const ve
 
 // =================== MAIN DRIVER ===================
 
-int main(int argc, char** argv) {
-    // Check for correct number of arguments
-    if (argc != 5) {
-        cerr << "Usage: " << argv[0] << " <vehicles.csv> <employees.csv> <metadata.csv> <matrix.txt>\n";
+int main(int argc, char* argv[]) {
+    if (argc < 2) {
+        cerr << "Usage: " << argv[0] << " <test_case_folder_path>" << endl;
+        cerr << "Example: " << argv[0] << " /home/yash/kriti/test_cases/TC_01" << endl;
         return 1;
     }
+
+    string basePath = argv[1];
+    // Ensure trailing slash
+    if (basePath.back() != '/') basePath += '/';
+
+    // =================== READ METADATA ===================
     
-    string vehicles_file = argv[1];
-    string employees_file = argv[2];
-    string metadata_file = argv[3];
-    string matrix_file = argv[4];
+    cout << "[INFO] Reading metadata..." << endl;
+    readMetadata(basePath + "metadata.csv");
+
+    // =================== READ VEHICLE & EMPLOYEE DATA ===================
     
     cout << "[INFO] Reading input data from CSV files..." << endl;
-    
-    // Load metadata first
-    loadMetadata(metadata_file);
-    
-    // Read vehicle and employee data
-    vector<Driver> drivers = readVehicleCSV(vehicles_file);
-    vector<Person> persons = readEmployeeCSV(employees_file);
+    vector<Driver> drivers = readVehicleCSV(basePath + "Vehicle_in.csv");
+    vector<Person> persons = readEmployeeCSV(basePath + "Employee_in.csv");
     
     if (drivers.empty() || persons.empty()) {
         cerr << "Error: Failed to load vehicle or employee data!" << endl;
         return 1;
     }
     
-    // Set global variables for matrix loading
-    N = persons.size();
-    V = drivers.size();
-    
-    // Load distance matrix
-    cout << "[INFO] Loading distance matrix..." << endl;
-    loadMatrix(matrix_file, N + V + 1);
+    cout << "[INFO] Precomputing distances..." << endl;
+    precomputeDistances(persons, drivers);
 
-    // =================== READ 4 CSV FILES AS INITIAL POPULATION ===================
+    // =================== READ 5 ALGORITHM OUTPUTS AS INITIAL POPULATION ===================
     
-    vector<string> inputFiles = {
-        "output_vehicle_1.csv",
-        "output_vehicle_2.csv",
-        "output_vehicle_3.csv",
-        "output_vehicle_4.csv"
+    vector<string> subfolders = {
+        "ALNS",
+        "Branch-And-Cut",
+        "Clustering-Routing-DP-Solver",
+        "Heterogeneous_DARP",
+        "Variable_Neighbourhood_Search"
     };
     
-    cout << "[INFO] Reading initial population from CSV files..." << endl;
+    cout << "[INFO] Reading initial population from algorithm subfolder outputs..." << endl;
     vector<Chromosome> population;
     
-    for(const auto& filename : inputFiles) {
-        cout << "[INFO] Reading: " << filename << endl;
-        Chromosome c = readCSVSolution(filename, persons, drivers);
+    for(const auto& folder : subfolders) {
+        string filepath = basePath + folder + "/output_vehicle.csv";
+        cout << "[INFO] Reading: " << filepath << endl;
+        
+        ifstream testFile(filepath);
+        if (!testFile.is_open()) {
+            cerr << "[WARN] Skipping " << filepath << " (file not found)" << endl;
+            continue;
+        }
+        testFile.close();
+        
+        Chromosome c = readCSVSolution(filepath, persons, drivers);
         splitProcedure(c, persons, drivers);
         population.push_back(c);
         cout << "  - Fitness: " << fixed << setprecision(2) << c.fitness << endl;
     }
     
-    int POP_SIZE = 4;
-    int GENERATIONS = 1000;
+    if (population.empty()) {
+        cerr << "Error: No initial solutions could be loaded!" << endl;
+        return 1;
+    }
+
+    int POP_SIZE = population.size();
+    int GENERATIONS = 200;
     mt19937 rng(chrono::steady_clock::now().time_since_epoch().count());
+
+    cout << "[INFO] Starting GA with population size " << POP_SIZE << " for " << GENERATIONS << " generations..." << endl;
 
     auto start_time = chrono::high_resolution_clock::now();
     
@@ -833,7 +874,7 @@ int main(int argc, char** argv) {
         vector<Chromosome> nextPop;
         nextPop.push_back(population[0]); // Keep best
 
-        while(nextPop.size() < POP_SIZE) {
+        while((int)nextPop.size() < POP_SIZE) {
             int t1 = rng() % POP_SIZE; 
             int t2 = rng() % POP_SIZE;
             
@@ -857,8 +898,8 @@ int main(int argc, char** argv) {
     // =================== OUTPUT TO CSV ===================
     
     cout << "\n[INFO] Writing final solution to CSV..." << endl;
-    writeCSVOutput("final_output_vehicle.csv", best, persons, drivers);
-    cout << "[INFO] Output written to: final_output_vehicle.csv" << endl;
+    writeCSVOutput(basePath + "final_output_vehicle.csv", best, persons, drivers);
+    cout << "[INFO] Output written to: " << basePath << "final_output_vehicle.csv" << endl;
 
     // =================== ENHANCED OUTPUT WITH METRICS ===================
     
@@ -920,10 +961,10 @@ int main(int argc, char** argv) {
                 double legDist = 0;
                 
                 if (i == 0) {
-                    legDist = getDistVP(vIdx, firstCust, drivers, persons);
+                    legDist = getDistVP(vIdx, firstCust, persons.size());
                     cout << "[Base -> ";
                 } else {
-                    legDist = getDistOP(firstCust, persons);
+                    legDist = getDistOP(firstCust, persons.size());
                     cout << "[Office -> ";
                 }
                 
@@ -937,7 +978,7 @@ int main(int argc, char** argv) {
 
                 for(size_t k=1; k<trip.customers.size(); k++) {
                     int cIdx = trip.customers[k];
-                    double dist = getDistPP(prevCust, cIdx, persons);
+                    double dist = getDistPP(prevCust, cIdx);
                     int travel = ceil((dist / d.speed_kmph) * 60);
                     currentTime = max(currentTime + travel, persons[cIdx].early_pickup);
                     
@@ -946,7 +987,7 @@ int main(int argc, char** argv) {
                     prevCust = cIdx;
                 }
 
-                double toOffice = getDistPO(prevCust, persons);
+                double toOffice = getDistPO(prevCust, persons.size());
                 int travelOffice = ceil((toOffice / d.speed_kmph) * 60);
                 currentTime += travelOffice;
                 vehicleTotalDist += toOffice;
@@ -960,5 +1001,6 @@ int main(int argc, char** argv) {
         cout << "\n" << string(80, '=') << "\n";
     }
     
+    cin.get();
     return 0;
 }
