@@ -1,17 +1,6 @@
 #include "crow_all.h"
 #include "json.hpp"
-#include <fstream>
-#include <iostream>
-#include <sstream>
-#include <vector>
-#include <string>
-#include <cstdlib>
-#include <cmath>
-#include <thread>
-#include <mutex>
-#include <iomanip>
-#include <random>
-#include <filesystem>
+#include<bits/stdc++.h>
 
 #define M_PI 3.14159265358979323846
 
@@ -88,6 +77,8 @@ struct TempDirGuard
             cleanup_tmp_dir(dir);
     }
 };
+
+int do_haversine = 0;
 
 /* ===================== STEP 1: MATRIX GENERATION ===================== */
 json generate_matrix_file(const std::string &empData,
@@ -206,7 +197,7 @@ json generate_matrix_file(const std::string &empData,
             json j;
             jf >> j;
 
-            if (!j.contains("distances")){
+            if (!j.contains("distances") && !do_haversine){
                 // return;
 
                 auto distances = j["distances"];
@@ -405,6 +396,11 @@ int main()
         saveFile((reqDir / "employees.csv").string(), empData);
         saveFile((reqDir / "vehicles.csv").string(), vehData);
         saveFile((reqDir / "metadata.csv").string(), metaData);
+
+        std::ifstream read_metadata("metadata.csv");
+        std::string metadata_line;
+        for(size_t i = 0; i < 4; i++) getline(read_metadata, metadata_line);
+        if(metadata_line=="distance_method,haversine") do_haversine = 1;
 
         // 4. Generate Matrix
         Matrix internal_matrix; 
