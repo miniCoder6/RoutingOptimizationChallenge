@@ -66,52 +66,6 @@ void cleanup_tmp_dir(const fs::path &dir)
     fs::remove_all(dir, ec);
 }
 
-
-int do_haversine = 0;
-double toRadians(double degree) {
-    return degree * (M_PI / 180.0);
-}
-
-double haversine(double lat1, double lon1, double lat2, double lon2) {
-    // Earth's radius in kilometers
-    const double R = 6371.0; 
-    
-    // If you need Miles, use R = 3958.8;
-
-    // Convert differences to radians
-    double dLat = toRadians(lat2 - lat1);
-    double dLon = toRadians(lon2 - lon1);
-
-    // Convert current latitudes to radians
-    lat1 = toRadians(lat1);
-    lat2 = toRadians(lat2);
-
-    // Apply formula
-    double a = std::pow(std::sin(dLat / 2), 2) + 
-               std::pow(std::sin(dLon / 2), 2) * std::cos(lat1) * std::cos(lat2);
-               
-    double c = 2 * std::atan2(std::sqrt(a), std::sqrt(1 - a));
-
-    return R * c;
-}
-
-struct TempDirGuard
-{
-    fs::path dir;
-    bool active;
-    TempDirGuard(fs::path d, bool a = true) : dir(d), active(a) {}
-    ~TempDirGuard()
-    {
-        if (active)
-            cleanup_tmp_dir(dir);
-<<<<<<< HEAD
-        }
-    };
-    
-=======
-    }
-};
-
 int do_haversine = 0;
 double toRadians(double degree)
 {
@@ -141,7 +95,18 @@ double haversine(double lat1, double lon1, double lat2, double lon2)
 
     return R * c;
 }
->>>>>>> c6fb67e (added god)
+
+struct TempDirGuard
+{
+    fs::path dir;
+    bool active;
+    TempDirGuard(fs::path d, bool a = true) : dir(d), active(a) {}
+    ~TempDirGuard()
+    {
+        if (active)
+            cleanup_tmp_dir(dir);
+    }
+};
 
 /* ===================== STEP 1: MATRIX GENERATION ===================== */
 json generate_matrix_file(const std::string &empData,
@@ -390,10 +355,6 @@ SolverResult run_solver(std::string folderName, std::string execName, fs::path r
 }
 /* ===================== MAIN SERVER ===================== */
 
-<<<<<<< HEAD
-
-=======
->>>>>>> c6fb67e (added god)
 int main()
 {
     crow::SimpleApp app;
@@ -455,7 +416,7 @@ int main()
 
         // 5. Run Algorithms
         // Note: Ensure your external programs (main_ALNS, etc.) accept the directory path as the first argument!
-        SolverResult alns_res, bac_res, crds_res, hd_res, vns_res, god;
+        SolverResult alns_res, bac_res, crds_res, hd_res, vns_res, god, mem;
 
         std::thread t1([&](){ alns_res = run_solver("ALNS", "main_ALNS", reqDir); });
         std::thread t2([&](){ bac_res = run_solver("Branch-And-Cut", "main_BAC", reqDir); });
@@ -516,6 +477,15 @@ int main()
             {"logs", god.logs},
             {"csv_vehicle", god.output_vehicle},
             {"csv_employee", god.output_employee}
+        };
+
+        mem = run_solver("memetic_algorithm", "main_Memetic", reqDir);
+
+        response["results"]["mem"] = {
+            {"status", mem.status},
+            {"logs", mem.logs},
+            {"csv_vehicle", mem.output_vehicle},
+            {"csv_employee", mem.output_employee}
         };
 
         crow::response res(200, response.dump());
