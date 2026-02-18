@@ -16,18 +16,22 @@
 using namespace std;
 namespace fs = std::filesystem;
 
+/* =========================================================
+   SECTION 1: SYSTEM CONFIGURATION & UTILITIES
+   ========================================================= */
 
-/**
- * =========================================================
- * SECTION 1: SYSTEM CONFIGURATION & UTILITIES
- * =========================================================
- */
 const double INF = 1e18;
 
 // GLOBAL CONFIGURATION
 struct Metadata {
     double obj_cost_weight = 0.5; 
     double obj_time_weight = 0.5; 
+
+    // ===== ADDED PENALTIES =====
+    double alpha = 5000.0;     // Ride Time Penalty
+    double beta  = 10000.0;    // Time Window Penalty
+    double gamma = 100000.0;   // Capacity Penalty
+
     map<int, double> priority_extensions;
 };
 
@@ -137,7 +141,13 @@ struct RouteResult {
     double weighted_score;  
     double finish_time;
     bool valid;
+
+    // ===== ADDED =====
+    double ride_time_violation;
+    double time_window_violation;
+    double capacity_violation;
 };
+
 
 /**
  * =========================================================
@@ -194,6 +204,7 @@ void loadMetadata(string filename) {
  * =========================================================
  */
 class RoutingEngineCommonDrop {
+
     int N, NODES;
     vector<vector<double>> dp;
     vector<vector<double>> time_state;
@@ -201,6 +212,7 @@ class RoutingEngineCommonDrop {
     vector<vector<double>> dist_state;
     vector<DPNode> nodes;
     DPNode common_drop;
+
     double current_vehicle_speed;
     double current_vehicle_cost_per_km;
     int cluster_size;
@@ -212,6 +224,7 @@ class RoutingEngineCommonDrop {
     void solve(int mask, int u) {
         for (int v = 1; v < NODES; v++) {
             if (!(mask & (1 << v))) {
+
                 double d = dist_lookup(u, v);
                 double travel_t = get_travel_time(d, current_vehicle_speed);
                 double arrival = time_state[mask][u] + travel_t;
@@ -222,16 +235,16 @@ class RoutingEngineCommonDrop {
 
                 double step_money_cost = d * current_vehicle_cost_per_km;
                 double step_money_weighted = step_money_cost * GLOBAL_CONFIG.obj_cost_weight;
-                
+
                 double time_added = travel_t + wait;
                 double step_time_weighted = time_added * cluster_size * GLOBAL_CONFIG.obj_time_weight;
 
-                double newWeightedCost = dp[mask][u] + step_money_weighted + step_time_weighted;
-                
+                double newCost = dp[mask][u] + step_money_weighted + step_time_weighted;
+
                 int newMask = mask | (1 << v);
 
-                if (newWeightedCost < dp[newMask][v]) {
-                    dp[newMask][v] = newWeightedCost;
+                if (newCost < dp[newMask][v]) {
+                    dp[newMask][v] = newCost;
                     time_state[newMask][v] = actual_time;
                     dist_state[newMask][v] = dist_state[mask][u] + d;
                     parent[newMask][v] = u;
@@ -242,70 +255,135 @@ class RoutingEngineCommonDrop {
     }
 
 public:
-    RouteResult calculate_optimal_route(Vehicle v, vector<Passenger>& cluster) {
-        N = cluster.size();
-        NODES = N + 1;
-        cluster_size = N;
-        current_vehicle_speed = v.avg_speed;
-        current_vehicle_cost_per_km = v.cost_per_km;
 
-        common_drop = {"OFFICE", cluster[0].d_lat, cluster[0].d_lon, 0, INF};
-        
-        double global_drop_deadline = INF;
-        for(auto& p : cluster) global_drop_deadline = min(global_drop_deadline, p.latest_drop);
+RouteResult calculate_optimal_route(Vehicle v, vector<Passenger>& cluster) {
 
-        nodes.resize(NODES);
-        nodes[0] = {v.id, v.lat, v.lon, v.available_time, INF};
-        for(int i=0; i<N; i++) {
-            nodes[i+1] = {cluster[i].id, cluster[i].p_lat, cluster[i].p_lon, 
-                          cluster[i].earliest_pickup, cluster[i].latest_drop};
-        }
+    N = cluster.size();
+    NODES = N + 1;
+    cluster_size = N;
 
-        dp.assign(1 << NODES, vector<double>(NODES, INF));
-        time_state.assign(1 << NODES, vector<double>(NODES, INF));
-        dist_state.assign(1 << NODES, vector<double>(NODES, INF));
-        parent.assign(1 << NODES, vector<int>(NODES, -1));
+    current_vehicle_speed = v.avg_speed;
+    current_vehicle_cost_per_km = v.cost_per_km;
 
-        dp[1][0] = 0;
-        time_state[1][0] = v.available_time;
-        dist_state[1][0] = 0;
+    common_drop = {"OFFICE", cluster[0].d_lat, cluster[0].d_lon, 0, INF};
 
-        solve(1, 0);
+    double global_drop_deadline = INF;
+    for(auto& p : cluster)
+        global_drop_deadline = min(global_drop_deadline, p.latest_drop);
 
-        RouteResult best_res = {INF, INF, INF, INF, INF, false};
-        int finalMask = (1 << NODES) - 1;
+    nodes.resize(NODES);
+    nodes[0] = {v.id, v.lat, v.lon, v.available_time, INF};
 
-        for (int i = 1; i < NODES; i++) {
-            if (dp[finalMask][i] < INF) {
-                double dist_to_drop = getDistanceFromMatrix(nodes[i].node_id, common_drop.node_id);
-                double travel_t = get_travel_time(dist_to_drop, current_vehicle_speed);
-                double final_arrival_time = time_state[finalMask][i] + travel_t;
-
-                if (final_arrival_time <= global_drop_deadline) {
-                    double total_trip_dist = dist_state[finalMask][i] + dist_to_drop;
-                    double trip_monetary_cost = total_trip_dist * v.cost_per_km;
-                    
-                    double total_passenger_time = 0;
-                    for(auto& p : cluster) {
-                        total_passenger_time += (final_arrival_time - p.earliest_pickup);
-                    }
-
-                    double weighted_score = (trip_monetary_cost * GLOBAL_CONFIG.obj_cost_weight) + 
-                                            (total_passenger_time * GLOBAL_CONFIG.obj_time_weight);
-
-                    if (weighted_score < best_res.weighted_score) {
-                        best_res.cost_dist = total_trip_dist;
-                        best_res.cost_money = trip_monetary_cost;
-                        best_res.passenger_time = total_passenger_time;
-                        best_res.weighted_score = weighted_score;
-                        best_res.finish_time = final_arrival_time;
-                        best_res.valid = true;
-                    }
-                }
-            }
-        }
-        return best_res;
+    for(int i=0;i<N;i++){
+        nodes[i+1] = {cluster[i].id, cluster[i].p_lat, cluster[i].p_lon,
+                      cluster[i].earliest_pickup, cluster[i].latest_drop};
     }
+
+    dp.assign(1<<NODES, vector<double>(NODES, INF));
+    time_state.assign(1<<NODES, vector<double>(NODES, INF));
+    dist_state.assign(1<<NODES, vector<double>(NODES, INF));
+    parent.assign(1<<NODES, vector<int>(NODES, -1));
+
+    dp[1][0] = 0;
+    time_state[1][0] = v.available_time;
+    dist_state[1][0] = 0;
+
+    solve(1,0);
+
+    RouteResult best_res = {INF,INF,INF,INF,INF,false,0,0,0};
+    int finalMask = (1<<NODES) - 1;
+
+    for(int i=1;i<NODES;i++){
+
+        if(dp[finalMask][i] >= INF) continue;
+
+        double dist_to_drop =
+            getDistanceFromMatrix(nodes[i].node_id, common_drop.node_id);
+
+        double travel_t =
+            get_travel_time(dist_to_drop, current_vehicle_speed);
+
+        double final_arrival =
+            time_state[finalMask][i] + travel_t;
+
+        double total_trip_dist =
+            dist_state[finalMask][i] + dist_to_drop;
+
+        double trip_cost =
+            total_trip_dist * v.cost_per_km;
+
+        double total_passenger_time = 0;
+        for(auto& p : cluster)
+            total_passenger_time += (final_arrival - p.earliest_pickup);
+
+        /* ===== TIME WINDOW VIOLATION ===== */
+        double time_window_violation = 0;
+        if(final_arrival > global_drop_deadline)
+            time_window_violation =
+                final_arrival - global_drop_deadline;
+
+        /* ===== RIDE TIME VIOLATION ===== */
+        double ride_time_violation = 0;
+
+        for(auto& p : cluster){
+
+            double direct_time =
+                get_travel_time(
+                    getDistanceFromMatrix(p.id,"OFFICE"),
+                    current_vehicle_speed
+                );
+
+            double actual_ride =
+                final_arrival - p.earliest_pickup;
+
+            double allowed_delay = 0;
+            if(GLOBAL_CONFIG.priority_extensions.count(p.priority))
+                allowed_delay =
+                    GLOBAL_CONFIG.priority_extensions[p.priority];
+
+            double delay = actual_ride - direct_time;
+
+            if(delay > allowed_delay)
+                ride_time_violation += (delay - allowed_delay);
+        }
+
+        /* ===== CAPACITY VIOLATION ===== */
+        double capacity_violation = 0;
+        if(cluster.size() > v.capacity)
+            capacity_violation =
+                cluster.size() - v.capacity;
+
+        /* ===== BASE OBJECTIVE ===== */
+        double base_score =
+            (trip_cost * GLOBAL_CONFIG.obj_cost_weight)
+          + (total_passenger_time * GLOBAL_CONFIG.obj_time_weight);
+
+        /* ===== PENALTIES ===== */
+        double penalties =
+            (GLOBAL_CONFIG.alpha * ride_time_violation)
+          + (GLOBAL_CONFIG.beta  * time_window_violation)
+          + (GLOBAL_CONFIG.gamma * capacity_violation);
+
+        double final_score = base_score + penalties;
+
+        if(final_score < best_res.weighted_score){
+
+            best_res.cost_dist = total_trip_dist;
+            best_res.cost_money = trip_cost;
+            best_res.passenger_time = total_passenger_time;
+            best_res.weighted_score = final_score;
+            best_res.finish_time = final_arrival;
+            best_res.valid = true;
+
+            best_res.ride_time_violation = ride_time_violation;
+            best_res.time_window_violation = time_window_violation;
+            best_res.capacity_violation = capacity_violation;
+        }
+    }
+
+    return best_res;
+}
+};
 
     pair<vector<pair<int, double>>, double> get_schedule(Vehicle v, vector<Passenger>& cluster) {
         calculate_optimal_route(v, cluster);
