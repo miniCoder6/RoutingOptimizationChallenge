@@ -1039,7 +1039,7 @@ int main(int argc, char *argv[])
     // =================== OUTPUT TO CSV ===================
 
     cout << "\n[INFO] Writing final solution to CSV..." << endl;
-    writeCSVOutput(basePath + "mem/final_output_vehicle.csv", best, persons, drivers);
+    writeCSVOutput(basePath + "memetic_algorithm/final_output_vehicle.csv", best, persons, drivers);
     cout << "[INFO] Output written to: " << basePath << "/final_output_vehicle.csv" << endl;
 
     // =================== ENHANCED OUTPUT WITH METRICS ===================
