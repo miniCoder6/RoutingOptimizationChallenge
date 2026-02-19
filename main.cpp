@@ -225,7 +225,7 @@ json generate_matrix_file(const std::string &empData,
             json j;
             jf >> j;
 
-            if (!j.contains("distances") && !do_haversine)
+            if (j.contains("distances") && !do_haversine)
             {
                 // return;
 
@@ -403,7 +403,7 @@ int main()
         std::ifstream read_metadata("metadata.csv");
         std::string metadata_line;
         for(size_t i = 0; i < 4; i++) getline(read_metadata, metadata_line);
-        if(metadata_line=="distance_method,haversine") do_haversine = 1;
+        // if(metadata_line=="distance_method,haversine") do_haversine = 1;
 
         // 4. Generate Matrix
         Matrix internal_matrix; 
