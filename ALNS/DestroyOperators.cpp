@@ -4,7 +4,7 @@
 #include <vector>
 
 void randomDestroy(std::vector<Route>& sol,int q){
-    // std::random_device rd;
+
     static std::mt19937 rng(42);
     int totalRemoved = 0;
     while(totalRemoved < q) {
@@ -24,6 +24,7 @@ void randomDestroy(std::vector<Route>& sol,int q){
 
         int i = rng() % sol[rIdx].seq.size();
         sol[rIdx].seq.erase(sol[rIdx].seq.begin() + i);
+        sol[rIdx].isDirty = true;
         totalRemoved++;
     }
 }
@@ -44,6 +45,7 @@ void worstCostDestroy(std::vector<Route>& sol,int q){
 
         if (longestRoute != -1) {
              sol[longestRoute].seq.pop_back();
+             sol[longestRoute].isDirty = true;
         } else {
             break;
         }
@@ -63,6 +65,7 @@ void vehicleDestroy(std::vector<Route>& sol){
 
     if(worst >= 0){
         sol[worst].seq.clear();
+        sol[worst].isDirty = true;
     }
 }
 
@@ -87,6 +90,7 @@ void timeWindowDestroy(std::vector<Route>& sol,
 
         if (rIdx != -1) {
             sol[rIdx].seq.pop_back();
+            sol[rIdx].isDirty = true;
         } else {
             break;
         }
