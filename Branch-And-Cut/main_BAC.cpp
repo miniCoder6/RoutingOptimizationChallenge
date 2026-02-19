@@ -576,7 +576,7 @@ int main(int argc, char **argv)
 
     // std::cout << "enter no. of iterations : ";
     // std::cin >> solver.max_iterations;
-    solver.max_iterations = 100000;
+    solver.max_iterations = 500000;
 
     Solver::Solution solution = solver.solveDeterministicAnnealing();
 
