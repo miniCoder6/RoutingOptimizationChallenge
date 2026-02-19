@@ -1,7 +1,7 @@
 #include "RepairOperators.h"
 #include <random>
 #include <algorithm>
-#include "Compatibility.h"
+
 #include "CostFunction.h"
 #include "Feasibility.h"
 #include <limits>
@@ -33,11 +33,11 @@ void greedyRepair(std::vector<Route>& sol,
             double bestCost = std::numeric_limits<double>::max();
             int bestVeh = -1;
             for(size_t v=0; v<sol.size(); v++){
-                if(!seatCompatible(e, veh[v])) continue;
-                if(!premiumCompatible(e, veh[v])) continue;
+
 
                 Route tmp = sol[v];
                 tmp.seq.push_back(e.id);
+                tmp.isDirty = true;
 
                 if (!routeFeasible(tmp, veh[v], emp)) continue;
 
@@ -50,6 +50,7 @@ void greedyRepair(std::vector<Route>& sol,
 
             if(bestVeh != -1) {
                 sol[bestVeh].seq.push_back(e.id);
+                sol[bestVeh].isDirty = true;
             }
         }
     }
@@ -59,7 +60,7 @@ void randomRepair(std::vector<Route>& sol,
                   const std::vector<Employee>& emp,
                   const std::vector<Vehicle>& veh,
                   const Metadata& meta){
-    // std::random_device rd;/
+
     static std::mt19937 rng(42);
 
     for(const auto& e:emp){
@@ -74,10 +75,10 @@ void randomRepair(std::vector<Route>& sol,
   
             std::vector<int> feasibleVehs;
             for(size_t v=0; v<sol.size(); ++v) {
-                if(!seatCompatible(e, veh[v])) continue;
-                if(!premiumCompatible(e, veh[v])) continue;
+
                 Route tmp = sol[v];
                 tmp.seq.push_back(e.id);
+                tmp.isDirty = true;
                 if(routeFeasible(tmp, veh[v], emp)) {
                     feasibleVehs.push_back(v);
                 }
@@ -87,23 +88,11 @@ void randomRepair(std::vector<Route>& sol,
                 int idx = std::uniform_int_distribution<>(0, feasibleVehs.size() - 1)(rng);
                 int v = feasibleVehs[idx];
                 sol[v].seq.push_back(e.id);
+                sol[v].isDirty = true;
             } else {
-              
-                std::vector<int> compatVehs;
-                 for(size_t v=0; v<sol.size(); ++v) {
-                    if(seatCompatible(e, veh[v]) && premiumCompatible(e, veh[v])) {
-                        compatVehs.push_back(v);
-                    }
-                }
-                
-                if (!compatVehs.empty()) {
-                     int idx = std::uniform_int_distribution<>(0, compatVehs.size() - 1)(rng);
-                     int v = compatVehs[idx];
-                     sol[v].seq.push_back(e.id);
-                } else {
-                      int v = std::uniform_int_distribution<>(0, sol.size() - 1)(rng);
-                      sol[v].seq.push_back(e.id);
-                }
+                  int v = std::uniform_int_distribution<>(0, sol.size() - 1)(rng);
+                  sol[v].seq.push_back(e.id);
+                  sol[v].isDirty = true;
             }
         }
     }
@@ -132,11 +121,11 @@ void regretRepair(std::vector<Route>& sol,
             std::vector<double> costs;
 
             for(size_t v=0; v<sol.size(); v++){
-                if(!seatCompatible(e, veh[v])) continue;
-                if(!premiumCompatible(e, veh[v])) continue;
+
 
                 Route tmp = sol[v];
                 tmp.seq.push_back(e.id);
+                tmp.isDirty = true;
 
                 if (!routeFeasible(tmp, veh[v], emp)) continue;
 
@@ -170,10 +159,10 @@ void regretRepair(std::vector<Route>& sol,
                          double bestCost = std::numeric_limits<double>::max();
                          int bVeh = -1;
                          for(size_t v=0; v<sol.size(); v++){
-                            if(!seatCompatible(e, veh[v])) continue;
-                            if(!premiumCompatible(e, veh[v])) continue;
+
                             Route tmp = sol[v];
                             tmp.seq.push_back(e.id);
+                            tmp.isDirty = true;
 
                             if (!routeFeasible(tmp, veh[v], emp)) continue;
 
@@ -185,6 +174,7 @@ void regretRepair(std::vector<Route>& sol,
                          }
                          if (bVeh != -1) {
                              sol[bVeh].seq.push_back(e.id);
+                             sol[bVeh].isDirty = true;
                              assigned[e.id] = true;
                              anyUnassigned = true;
                              continue;
@@ -197,11 +187,11 @@ void regretRepair(std::vector<Route>& sol,
 
         double bestCost = std::numeric_limits<double>::max();
         for(size_t v=0; v<sol.size(); v++){
-            if(!seatCompatible(emp[bestEmp], veh[v])) continue;
-            if(!premiumCompatible(emp[bestEmp], veh[v])) continue;
+
 
             Route tmp = sol[v];
             tmp.seq.push_back(bestEmp);
+            tmp.isDirty = true;
 
             if (!routeFeasible(tmp, veh[v], emp)) continue;
 
@@ -214,6 +204,7 @@ void regretRepair(std::vector<Route>& sol,
 
         if (bestVeh != -1) {
             sol[bestVeh].seq.push_back(bestEmp);
+            sol[bestVeh].isDirty = true;
             assigned[bestEmp] = true;
         } else {
             assigned[bestEmp] = true;

@@ -2,7 +2,7 @@
 #include "Route.h"
 #include "Vehicle.h"
 #include "Employee.h"
-#include "Compatibility.h"
+
 #include "Distance.h"
 #include <vector>
 #include <algorithm>
@@ -36,7 +36,7 @@ inline bool routeFeasible(const Route& r,
         int eId = r.seq[i];
         const auto& e = emp[eId];
 
-        if (!premiumCompatible(e, v)) return false;
+
         bool fits = checkBatch(batch, eId);
 
         double travel = distKm(cx, cy, e.x, e.y) / v.speed * 60.0;

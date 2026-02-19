@@ -4,12 +4,13 @@
 #include <iostream>
 #include <fstream>      
 #include "Feasibility.h" 
-#include "Compatibility.h"
+
 #include "Distance.h"
 #include"mapper.h"
 #include <iomanip>
 #include<chrono>
-#include<map>
+std::map<std::pair<double, double>, int> mappy;
+double path_len[251][251];
 
 
 bool checkBatchFits(const std::vector<int> &batch, int nextId, const Vehicle &v, const std::vector<Employee> &emp, double currentT, double currentX, double currentY,const Metadata& meta)

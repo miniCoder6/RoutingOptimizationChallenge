@@ -4,5 +4,6 @@
 struct Route {
     int vehicleId;
     std::vector<int> seq;
-    double cost = 0.0;
+    mutable double cachedCost = 0.0;
+    mutable bool isDirty = true;
 };

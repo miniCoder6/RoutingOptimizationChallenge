@@ -1,6 +1,6 @@
 #include "CostFunction.h"
 #include "Distance.h"
-#include "Compatibility.h" 
+
 #include <algorithm>
 #include <vector>
 #include <cmath>
@@ -11,6 +11,8 @@ static double priorityPenalty(int p){
 
 double routeCost(const Route& r, const Vehicle& v, const std::vector<Employee>& emp, const Metadata& meta){
     if (r.seq.empty()) return 0.0;
+    if (!r.isDirty) return r.cachedCost;
+
     std::vector<double> pickupTime(emp.size(), -1); //1
 
     double t = v.startTime;
@@ -29,7 +31,7 @@ double routeCost(const Route& r, const Vehicle& v, const std::vector<Employee>& 
         const auto& last = emp[batch.back()]; 
         double dOff = distKm(currX, currY, last.destX, last.destY);
         double travelT = (dOff / v.speed) * 60.0;
-       // t1+= travelT*batch.size();
+
         totalDist += dOff;
         
         double arrival = currT + travelT;
@@ -47,15 +49,9 @@ double routeCost(const Route& r, const Vehicle& v, const std::vector<Employee>& 
                 // Scales from 2^20 at 0 min to 2^35 at 180 min
                 double exponent = 40.0 + (40.0 / 180.0) * lateMins;
                 penaltyCost += std::pow(2.0, exponent);
-                // Debug Print
-                // std::cout << "Penalty Applied! Employee: " << id 
-                //           << " Arrival: " << arrival 
-                //           << " Due (+buffer): " << due 
-                //           << " LateMins: " << lateMins 
-                //           << " Penalty: " << std::pow(2.0, exponent) 
-                //           << " Cumulative Penalty: " << penaltyCost << std::endl;
+
             } else {
-                 // std::cout << "No Penalty. Employee: " << id << " Arrival: " << arrival << " Due: " << due << std::endl;
+
             }
         }
         
@@ -72,7 +68,7 @@ double routeCost(const Route& r, const Vehicle& v, const std::vector<Employee>& 
             penaltyCost += std::pow(2.0, 20.0);
         } 
         else if (e.vehiclePref == "normal" && v.premium) {
-         //   penaltyCost += std::pow(2.0, 20.0);
+
         }
         // "any" gets no penalty
         
@@ -88,25 +84,25 @@ double routeCost(const Route& r, const Vehicle& v, const std::vector<Employee>& 
             double d = distKm(cx, cy, e.x, e.y);
             totalDist += d;
             t += ((d / v.speed) * 60.0);  
-            //t1 += batch.size()*((d / v.speed) * 60.0);  
+
         } else {
         }
         if (!batch.empty() && fits) { 
              double d = distKm(cx, cy, e.x, e.y);
              totalDist += d;
              t += (d / v.speed) * 60.0;
-            // t1 += batch.size()*((d / v.speed) * 60.0);
+
         } else if (batch.empty()) {
              if (fits) {
                  double d = distKm(cx, cy, e.x, e.y);
                  totalDist += d;
                  t += (d / v.speed) * 60.0;
-                //  t1 += batch.size()*((d / v.speed) * 60.0);
+
              }
         }
 
         if(t<e.ready){
-            //t1+=(e.ready-t)*batch.size();
+
         }
         double startService = std::max(t, e.ready);
         t = startService;
@@ -130,6 +126,8 @@ double routeCost(const Route& r, const Vehicle& v, const std::vector<Employee>& 
     
     double operationalCost = (travelMoneyCost * meta.objectiveCostWeight) + (duration * meta.objectiveTimeWeight);
     
-    return operationalCost + penaltyCost;
+    r.cachedCost = operationalCost + penaltyCost;
+    r.isDirty = false;
+    return r.cachedCost;
 }
 
