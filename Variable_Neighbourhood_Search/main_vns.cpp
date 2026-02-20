@@ -440,10 +440,10 @@ int main(int argc, char **argv) {
     fs::path matrix_path = base_dir / "matrix.txt";
 
     cout << "Loading CSV files..." << endl;
-    loadVehicles(argv[1]);
-    loadEmployees(argv[2]);
-    loadMetadata(argv[3]);
-    loadMatrix(argv[4], N + V + 1);
+    loadVehicles(vehicles_path.string());
+    loadEmployees(employees_path.string());
+    loadMetadata(metadata_path.string());
+    loadMatrix(matrix_path.string(), N + V + 1);
 
     if(req_ids.empty() || veh_ids.empty()) {
         cerr << "Error: No data loaded. Check filenames." << endl;
