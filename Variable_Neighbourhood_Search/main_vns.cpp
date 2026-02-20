@@ -455,7 +455,7 @@ int main(int argc, char **argv) {
     Solution current = initialSolution();
     Solution best = current;
 
-    int max_iter = 10000;
+    int max_iter = 100000;
     int k_max = 2;
 
     for(int iter = 0; iter < max_iter; iter++) {
