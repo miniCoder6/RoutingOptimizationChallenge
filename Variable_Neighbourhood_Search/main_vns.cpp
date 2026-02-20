@@ -582,7 +582,7 @@ int main(int argc, char **argv)
     // --- Output CSVs ---
     fs::path veh_out_path = base_dir / "Variable_Neighbourhood_Search/output_vehicle.csv";
     ofstream outFileVeh(veh_out_path);
-    outFileVeh << fixed << setprecision(3) << final_obj << "," << final_penalty << endl;
+    outFileVeh << fixed << setprecision(3) << final_obj - final_penalty << "," << final_obj << endl;
     outFileVeh << "vehicle_id,category,employee_id,pickup_time,drop_time" << endl;
 
     struct EmpRecord
