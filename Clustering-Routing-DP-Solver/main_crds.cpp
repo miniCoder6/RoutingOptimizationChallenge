@@ -25,16 +25,16 @@ namespace fs = std::filesystem;
  */
 const double INF = 1e18;
 
-// GLOBAL CONFIGURATION
+// GLOBAL CONFIGURATION — penalty weights now match hetero.cpp
 struct Metadata {
-    double obj_cost_weight = 0.5; 
-    double obj_time_weight = 0.5; 
+    double obj_cost_weight = 1.0;    // matches hetero default (dist_cost=1.0)
+    double obj_time_weight = 0.0;    // matches hetero default (time_cost=0.0)
     map<int, double> priority_extensions;
 
-    // --- PENALTY WEIGHTS (matching hetero.cpp) ---
-    double alpha = 5000.0;    // Ride Time Penalty
-    double beta  = 10000.0;   // Time Window Penalty
-    double gamma = 100000.0;  // Capacity / Sharing Penalty
+    // --- PENALTY WEIGHTS (matching hetero.cpp Config) ---
+    double alpha = 100000.0;   // Ride Time Penalty
+    double beta  = 1000.0;     // Time Window Penalty
+    double gamma = 500000.0;   // Capacity / Sharing Penalty
 };
 
 Metadata GLOBAL_CONFIG;
@@ -115,6 +115,7 @@ struct Passenger {
     int capacity_pref;      
     string vehicle_pref;    
     int priority;           
+    bool pref_premium = false;
 };
 
 struct Vehicle {
@@ -127,6 +128,7 @@ struct Vehicle {
     string category;        
     double avg_speed;
     double cost_per_km;     
+    bool is_premium = false;
 };
 
 struct DPNode {
@@ -137,13 +139,13 @@ struct DPNode {
 };
 
 struct RouteResult {
-    double cost_dist;           
-    double cost_money;          
-    double passenger_time;      
-    double weighted_score;      // base objective only (cost + time)
-    double penalized_score;     // base + alpha/beta/gamma penalties
+    double cost_dist;               // total km
+    double cost_money;              // total_dist * cost_per_km  (= total_cost in hetero)
+    double passenger_time;          // sum of actual ride times  (= total_time in hetero)
+    double weighted_score;          // base objective: (cost_weight * cost_money) + (time_weight * passenger_time)
+    double penalized_score;         // weighted_score + alpha*ride_viol + beta*tw_viol + gamma*cap_viol
     double finish_time;
-    bool valid;
+    bool valid;                     // true iff all violations < 1.0
 
     // Violation components (matching hetero.cpp)
     double ride_time_violation;
@@ -160,8 +162,11 @@ void loadMetadata(string filename) {
     ifstream file(filename);
     if (!file.is_open()) {
         cerr << "Warning: Metadata file " << filename << " not found. Using defaults." << endl;
-        GLOBAL_CONFIG.priority_extensions[1] = 5;
-        GLOBAL_CONFIG.priority_extensions[5] = 30;
+        GLOBAL_CONFIG.priority_extensions[1] = 10;
+        GLOBAL_CONFIG.priority_extensions[2] = 20;
+        GLOBAL_CONFIG.priority_extensions[3] = 30;
+        GLOBAL_CONFIG.priority_extensions[4] = 45;
+        GLOBAL_CONFIG.priority_extensions[5] = 60;
         return;
     }
 
@@ -195,7 +200,6 @@ void loadMetadata(string filename) {
                 } catch(...) {}
             }
         }
-        // Load penalty weights if present in metadata
         else if (key.find("penalty_alpha") != string::npos) {
             GLOBAL_CONFIG.alpha = val;
         } else if (key.find("penalty_beta") != string::npos) {
@@ -204,6 +208,14 @@ void loadMetadata(string filename) {
             GLOBAL_CONFIG.gamma = val;
         }
     }
+
+    // Fill any missing priority extensions with defaults matching hetero.cpp
+    if (!GLOBAL_CONFIG.priority_extensions.count(1)) GLOBAL_CONFIG.priority_extensions[1] = 10;
+    if (!GLOBAL_CONFIG.priority_extensions.count(2)) GLOBAL_CONFIG.priority_extensions[2] = 20;
+    if (!GLOBAL_CONFIG.priority_extensions.count(3)) GLOBAL_CONFIG.priority_extensions[3] = 30;
+    if (!GLOBAL_CONFIG.priority_extensions.count(4)) GLOBAL_CONFIG.priority_extensions[4] = 45;
+    if (!GLOBAL_CONFIG.priority_extensions.count(5)) GLOBAL_CONFIG.priority_extensions[5] = 60;
+
     cout << "Metadata Loaded: Cost Weight=" << GLOBAL_CONFIG.obj_cost_weight 
          << ", Time Weight=" << GLOBAL_CONFIG.obj_time_weight << endl;
     cout << "Penalty Weights: alpha=" << GLOBAL_CONFIG.alpha
@@ -241,19 +253,22 @@ class RoutingEngineCommonDrop {
                 double wait = max(0.0, nodes[v].early - arrival);
                 double actual_time = arrival + wait;
 
-                // --- Time Window Violation Penalty (beta) ---
-                // A passenger is still visited even if slightly late, but we add a penalty.
-                // Only hard-skip if violation is extreme (keeps DP tractable).
+                // Time window hard cutoff only for truly impossible cases
                 double tw_violation = max(0.0, actual_time - nodes[v].late);
-                if (tw_violation > 1e9) continue; // hard cutoff for truly impossible
+                if (tw_violation > 1e9) continue;
 
+                // -------------------------------------------------------
+                // DP transition cost:
+                // monetary cost of this leg + weighted time spent (matching hetero)
+                // -------------------------------------------------------
                 double step_money_cost = d * current_vehicle_cost_per_km;
                 double step_money_weighted = step_money_cost * GLOBAL_CONFIG.obj_cost_weight;
-                
+
                 double time_added = travel_t + wait;
+                // Passenger time contribution: all cluster members wait during this leg
                 double step_time_weighted = time_added * cluster_size * GLOBAL_CONFIG.obj_time_weight;
 
-                // Add beta penalty contribution for time window violation in this step
+                // Add soft beta penalty for time window violation in this step
                 double step_tw_penalty = tw_violation * GLOBAL_CONFIG.beta;
 
                 double newWeightedCost = dp[mask][u] + step_money_weighted + step_time_weighted + step_tw_penalty;
@@ -281,9 +296,6 @@ public:
 
         common_drop = {"OFFICE", cluster[0].d_lat, cluster[0].d_lon, 0, INF};
         
-        double global_drop_deadline = INF;
-        for(auto& p : cluster) global_drop_deadline = min(global_drop_deadline, p.latest_drop);
-
         nodes.resize(NODES);
         nodes[0] = {v.id, v.lat, v.lon, v.available_time, INF};
         for(int i=0; i<N; i++) {
@@ -305,83 +317,130 @@ public:
         RouteResult best_res = {INF, INF, INF, INF, INF, INF, false, INF, INF, INF};
         int finalMask = (1 << NODES) - 1;
 
+        // We need pickup times per passenger for ride-time computation.
+        // Since DP only tracks pickup order, we reconstruct them per candidate end node.
         for (int i = 1; i < NODES; i++) {
-            if (dp[finalMask][i] < INF) {
-                double dist_to_drop = getDistanceFromMatrix(nodes[i].node_id, common_drop.node_id);
-                double travel_t = get_travel_time(dist_to_drop, current_vehicle_speed);
-                double final_arrival_time = time_state[finalMask][i] + travel_t;
+            if (dp[finalMask][i] >= INF) continue;
 
-                double total_trip_dist = dist_state[finalMask][i] + dist_to_drop;
-                double trip_monetary_cost = total_trip_dist * v.cost_per_km;
-                
-                double total_passenger_time = 0;
-                for(auto& p : cluster) {
-                    total_passenger_time += (final_arrival_time - p.earliest_pickup);
+            double dist_to_drop = getDistanceFromMatrix(nodes[i].node_id, common_drop.node_id);
+            double travel_t = get_travel_time(dist_to_drop, current_vehicle_speed);
+            double drop_arrival = time_state[finalMask][i] + travel_t;
+
+            double total_trip_dist = dist_state[finalMask][i] + dist_to_drop;
+
+            // ---- monetary cost = total_dist * cost_per_km  (matches hetero: total_cost) ----
+            double trip_monetary_cost = total_trip_dist * v.cost_per_km;
+
+            // ---- Reconstruct pickup times from parent chain ----
+            // Walk the parent chain to recover the visit order
+            vector<int> visit_order;
+            {
+                int curr = i, mask = finalMask;
+                while (curr != 0 && curr != -1) {
+                    visit_order.push_back(curr);
+                    int prev = parent[mask][curr];
+                    mask ^= (1 << curr);
+                    curr = prev;
                 }
+                reverse(visit_order.begin(), visit_order.end());
+            }
 
-                // ---- BASE OBJECTIVE (same as before) ----
-                double weighted_score = (trip_monetary_cost * GLOBAL_CONFIG.obj_cost_weight) + 
-                                        (total_passenger_time * GLOBAL_CONFIG.obj_time_weight);
-
-                // ---- VIOLATION COMPUTATIONS (matching hetero.cpp) ----
-
-                // 1. Time Window Violation (beta): drop later than latest_drop + priority_extension
-                double tw_violation = 0.0;
-                for(auto& p : cluster) {
-                    double drop_late = max(0.0, final_arrival_time - p.latest_drop);
-                    tw_violation += drop_late;
+            // Simulate forward to get per-passenger pickup time
+            vector<double> pickup_time(N, 0.0);
+            {
+                double cur_t = v.available_time;
+                int prev_node = 0;
+                for (int node_idx : visit_order) {
+                    double d = dist_lookup(prev_node, node_idx);
+                    double arr = cur_t + get_travel_time(d, current_vehicle_speed);
+                    double actual = max(arr, nodes[node_idx].early);
+                    pickup_time[node_idx - 1] = actual;  // node_idx-1 = passenger index
+                    cur_t = actual;
+                    prev_node = node_idx;
                 }
+            }
 
-                // 2. Ride Time Violation (alpha): actual ride > direct ride + priority max delay
-                double ride_violation = 0.0;
-                for(auto& p : cluster) {
-                    double direct_dist = getDistanceFromMatrix(p.id, "OFFICE");
-                    double direct_time = get_travel_time(direct_dist, v.avg_speed);
-                    // pickup time approximation: earliest_pickup (conservative)
-                    double actual_ride = final_arrival_time - p.earliest_pickup;
-                    double excess = actual_ride - direct_time;
-                    // max_delay from priority_extensions (same values used for latest_drop extension)
-                    double max_delay = 0.0;
-                    if (GLOBAL_CONFIG.priority_extensions.count(p.priority)) {
-                        max_delay = GLOBAL_CONFIG.priority_extensions.at(p.priority);
-                    }
-                    double violation = max(0.0, excess - max_delay);
-                    ride_violation += violation;
-                }
+            // ---- passenger_time = sum of actual ride times (drop_arrival - pickup_time[p])
+            //      This matches hetero.cpp: total_passenger_time += actual_ride_time
+            double total_passenger_time = 0.0;
+            for (int k = 0; k < N; k++) {
+                total_passenger_time += (drop_arrival - pickup_time[k]);
+            }
 
-                // 3. Capacity / Sharing Violation (gamma):
-                //    cluster size exceeds any member's capacity_pref
-                double cap_violation = 0.0;
-                int min_pref = INT_MAX;
-                for(auto& p : cluster) min_pref = min(min_pref, p.capacity_pref);
-                if ((int)cluster.size() > min_pref) {
-                    cap_violation += (double)((int)cluster.size() - min_pref);
-                }
-                // Also vehicle capacity check (should already be filtered, but mirror hetero)
-                if ((int)cluster.size() > v.capacity) {
-                    cap_violation += (double)((int)cluster.size() - v.capacity);
-                }
+            // ---- BASE OBJECTIVE (matching hetero.cpp exactly) ----
+            // base_obj = (cost_weight * total_cost) + (time_weight * total_time)
+            double weighted_score = (GLOBAL_CONFIG.obj_cost_weight * trip_monetary_cost) +
+                                    (GLOBAL_CONFIG.obj_time_weight * total_passenger_time);
 
-                // ---- PENALIZED SCORE (matching hetero.cpp formula exactly) ----
-                double penalized_score = weighted_score
-                    + GLOBAL_CONFIG.alpha * ride_violation
-                    + GLOBAL_CONFIG.beta  * tw_violation
-                    + GLOBAL_CONFIG.gamma * cap_violation;
+            // ---- VIOLATION COMPUTATIONS (matching hetero.cpp) ----
 
-                // Use penalized_score for selecting best result
-                if (penalized_score < best_res.penalized_score) {
-                    best_res.cost_dist           = total_trip_dist;
-                    best_res.cost_money          = trip_monetary_cost;
-                    best_res.passenger_time      = total_passenger_time;
-                    best_res.weighted_score      = weighted_score;
-                    best_res.penalized_score     = penalized_score;
-                    best_res.finish_time         = final_arrival_time;
-                    best_res.ride_time_violation = ride_violation;
-                    best_res.time_window_violation = tw_violation;
-                    best_res.capacity_violation  = cap_violation;
-                    // Mark valid only when truly feasible (no violations), matching hetero
-                    best_res.valid = (ride_violation < 1.0 && tw_violation < 1.0 && cap_violation < 1.0);
+            // 1. Time Window Violation (beta):
+            //    drop_arrival > latest_drop + max_delay  (hetero uses buffer = max_delays[priority])
+            double tw_violation = 0.0;
+            for (int k = 0; k < N; k++) {
+                double max_delay = 0.0;
+                if (GLOBAL_CONFIG.priority_extensions.count(cluster[k].priority))
+                    max_delay = GLOBAL_CONFIG.priority_extensions.at(cluster[k].priority);
+                double lateness = drop_arrival - (cluster[k].latest_drop + max_delay);
+                tw_violation += max(0.0, lateness);
+            }
+
+            // 2. Ride Time Violation (alpha):
+            //    actual_ride_time > direct_time + max_allowed_delay
+            double ride_violation = 0.0;
+            for (int k = 0; k < N; k++) {
+                double direct_dist = getDistanceFromMatrix(cluster[k].id, "OFFICE");
+                double direct_time = get_travel_time(direct_dist, v.avg_speed);
+                double actual_ride_time = drop_arrival - pickup_time[k];
+                double delay = actual_ride_time - direct_time;
+
+                double max_delay = 0.0;
+                if (GLOBAL_CONFIG.priority_extensions.count(cluster[k].priority))
+                    max_delay = GLOBAL_CONFIG.priority_extensions.at(cluster[k].priority);
+
+                ride_violation += max(0.0, delay - max_delay);
+            }
+
+            // 3. Capacity / Sharing Violation (gamma): matching hetero.cpp route.evaluate()
+            //    - vehicle capacity exceeded
+            //    - sharing preference exceeded (min max_sharing among onboard)
+            //    - premium preference mismatch
+            double cap_violation = 0.0;
+            if ((int)cluster.size() > v.capacity) {
+                cap_violation += (double)((int)cluster.size() - v.capacity);
+            }
+            // min sharing preference across all cluster members
+            int min_pref = INT_MAX;
+            for (auto& p : cluster) min_pref = min(min_pref, p.capacity_pref);
+            if ((int)cluster.size() > min_pref) {
+                cap_violation += (double)((int)cluster.size() - min_pref);
+            }
+            // vehicle type mismatch (premium requested but not premium vehicle)
+            for (auto& p : cluster) {
+                if (p.pref_premium && !v.is_premium) {
+                    cap_violation += 10000.0;  // large penalty matching hetero
                 }
+            }
+
+            // ---- PENALIZED SCORE (matching hetero.cpp formula exactly) ----
+            // objective_score = base_obj + alpha*ride_viol + beta*tw_viol + gamma*cap_viol
+            double penalized_score = weighted_score
+                + GLOBAL_CONFIG.alpha * ride_violation
+                + GLOBAL_CONFIG.beta  * tw_violation
+                + GLOBAL_CONFIG.gamma * cap_violation;
+
+            if (penalized_score < best_res.penalized_score) {
+                best_res.cost_dist              = total_trip_dist;
+                best_res.cost_money             = trip_monetary_cost;
+                best_res.passenger_time         = total_passenger_time;
+                best_res.weighted_score         = weighted_score;
+                best_res.penalized_score        = penalized_score;
+                best_res.finish_time            = drop_arrival;
+                best_res.ride_time_violation    = ride_violation;
+                best_res.time_window_violation  = tw_violation;
+                best_res.capacity_violation     = cap_violation;
+                // feasible iff all violations < 1.0  (matching hetero)
+                best_res.valid = (ride_violation < 1.0 && tw_violation < 1.0 && cap_violation < 1.0);
             }
         }
         return best_res;
@@ -390,55 +449,87 @@ public:
     pair<vector<pair<int, double>>, double> get_schedule(Vehicle v, vector<Passenger>& cluster) {
         calculate_optimal_route(v, cluster);
 
-        int NODES = cluster.size() + 1;
-        int finalMask = (1 << NODES) - 1;
+        int NODES_local = cluster.size() + 1;
+        int finalMask = (1 << NODES_local) - 1;
         int bestEndNode = -1;
         double best_penalized = INF;
-        double bestDropTime = INF;
         DPNode drop = {"OFFICE", cluster[0].d_lat, cluster[0].d_lon, 0, INF};
 
-        for (int i = 1; i < NODES; i++) {
-             if (dp[finalMask][i] < INF) {
-                double d = getDistanceFromMatrix(nodes[i].node_id, drop.node_id);
-                double t = time_state[finalMask][i] + get_travel_time(d, v.avg_speed);
-                
-                double total_dist = dist_state[finalMask][i] + d;
-                double cost = total_dist * v.cost_per_km;
-                double p_time = 0;
-                for(int k=0; k<(int)cluster.size(); k++) p_time += (t - nodes[k+1].early); 
-                
-                double base_score = (cost * GLOBAL_CONFIG.obj_cost_weight) + (p_time * GLOBAL_CONFIG.obj_time_weight);
+        for (int i = 1; i < NODES_local; i++) {
+            if (dp[finalMask][i] >= INF) continue;
 
-                // ---- Recompute violations for schedule selection ----
-                double tw_v = 0.0, ride_v = 0.0, cap_v = 0.0;
-                for(auto& p : cluster) {
-                    tw_v += max(0.0, t - p.latest_drop);
-                    double direct_dist = getDistanceFromMatrix(p.id, "OFFICE");
-                    double direct_time = get_travel_time(direct_dist, v.avg_speed);
-                    double actual_ride = t - p.earliest_pickup;
-                    double max_delay = 0.0;
-                    if (GLOBAL_CONFIG.priority_extensions.count(p.priority))
-                        max_delay = GLOBAL_CONFIG.priority_extensions.at(p.priority);
-                    ride_v += max(0.0, (actual_ride - direct_time) - max_delay);
+            double d = getDistanceFromMatrix(nodes[i].node_id, drop.node_id);
+            double drop_time = time_state[finalMask][i] + get_travel_time(d, v.avg_speed);
+            
+            double total_dist = dist_state[finalMask][i] + d;
+            double cost = total_dist * v.cost_per_km;
+
+            // Reconstruct pickup times
+            vector<int> visit_order;
+            {
+                int curr = i, mask = finalMask;
+                while (curr != 0 && curr != -1) {
+                    visit_order.push_back(curr);
+                    int prev = parent[mask][curr];
+                    mask ^= (1 << curr);
+                    curr = prev;
                 }
-                int min_pref = INT_MAX;
-                for(auto& p : cluster) min_pref = min(min_pref, p.capacity_pref);
-                if ((int)cluster.size() > min_pref) cap_v += (double)((int)cluster.size() - min_pref);
-                if ((int)cluster.size() > v.capacity) cap_v += (double)((int)cluster.size() - v.capacity);
-
-                double penalized = base_score
-                    + GLOBAL_CONFIG.alpha * ride_v
-                    + GLOBAL_CONFIG.beta  * tw_v
-                    + GLOBAL_CONFIG.gamma * cap_v;
-
-                if(penalized < best_penalized) { 
-                    best_penalized = penalized; 
-                    bestEndNode = i; 
-                    bestDropTime = t; 
+                reverse(visit_order.begin(), visit_order.end());
+            }
+            vector<double> pickup_time((int)cluster.size(), 0.0);
+            {
+                double cur_t = v.available_time;
+                int prev_node = 0;
+                for (int node_idx : visit_order) {
+                    double dist_leg = getDistanceFromMatrix(nodes[prev_node].node_id, nodes[node_idx].node_id);
+                    double arr = cur_t + get_travel_time(dist_leg, v.avg_speed);
+                    double actual = max(arr, nodes[node_idx].early);
+                    pickup_time[node_idx - 1] = actual;
+                    cur_t = actual;
+                    prev_node = node_idx;
                 }
-             }
+            }
+
+            // passenger_time = sum of actual ride times
+            double p_time = 0.0;
+            for (int k = 0; k < (int)cluster.size(); k++)
+                p_time += (drop_time - pickup_time[k]);
+
+            double base_score = (GLOBAL_CONFIG.obj_cost_weight * cost) +
+                                (GLOBAL_CONFIG.obj_time_weight * p_time);
+
+            // Violations
+            double tw_v = 0.0, ride_v = 0.0, cap_v = 0.0;
+            for (int k = 0; k < (int)cluster.size(); k++) {
+                double max_delay = 0.0;
+                if (GLOBAL_CONFIG.priority_extensions.count(cluster[k].priority))
+                    max_delay = GLOBAL_CONFIG.priority_extensions.at(cluster[k].priority);
+                tw_v += max(0.0, drop_time - (cluster[k].latest_drop + max_delay));
+
+                double direct_dist = getDistanceFromMatrix(cluster[k].id, "OFFICE");
+                double direct_time = get_travel_time(direct_dist, v.avg_speed);
+                double actual_ride = drop_time - pickup_time[k];
+                ride_v += max(0.0, (actual_ride - direct_time) - max_delay);
+            }
+            int min_pref = INT_MAX;
+            for (auto& p : cluster) min_pref = min(min_pref, p.capacity_pref);
+            if ((int)cluster.size() > min_pref) cap_v += (double)((int)cluster.size() - min_pref);
+            if ((int)cluster.size() > v.capacity) cap_v += (double)((int)cluster.size() - v.capacity);
+            for (auto& p : cluster)
+                if (p.pref_premium && !v.is_premium) cap_v += 10000.0;
+
+            double penalized = base_score
+                + GLOBAL_CONFIG.alpha * ride_v
+                + GLOBAL_CONFIG.beta  * tw_v
+                + GLOBAL_CONFIG.gamma * cap_v;
+
+            if (penalized < best_penalized) { 
+                best_penalized = penalized; 
+                bestEndNode = i; 
+            }
         }
 
+        // Reconstruct path
         vector<int> path;
         int curr = bestEndNode;
         int mask = finalMask;
@@ -455,17 +546,17 @@ public:
         int prev_node_idx = 0;
 
         for(int node_idx : path) {
-            double d = getDistanceFromMatrix(nodes[prev_node_idx].node_id, nodes[node_idx].node_id);
-            double arr = curr_t + get_travel_time(d, v.avg_speed);
+            double dist_leg = getDistanceFromMatrix(nodes[prev_node_idx].node_id, nodes[node_idx].node_id);
+            double arr = curr_t + get_travel_time(dist_leg, v.avg_speed);
             double actual = max(arr, nodes[node_idx].early);
-
             pickups.push_back({node_idx - 1, actual});
             curr_t = actual;
             prev_node_idx = node_idx;
         }
         
+        // Final drop time
         double d_drop = getDistanceFromMatrix(nodes[prev_node_idx].node_id, drop.node_id);
-        bestDropTime = curr_t + get_travel_time(d_drop, v.avg_speed);
+        double bestDropTime = curr_t + get_travel_time(d_drop, v.avg_speed);
 
         return {pickups, bestDropTime};
     }
@@ -582,19 +673,12 @@ vector<Passenger> loadPassengers(string filename) {
         try { p.d_lat = stod(cols[4]); } catch(...) { p.d_lat = 0; }
         try { p.d_lon = stod(cols[5]); } catch(...) { p.d_lon = 0; }
         p.earliest_pickup = (double)timeToMin(cols[6]);
-        double base_latest = (double)timeToMin(cols[7]);
-        double extension = 0;
-        if (GLOBAL_CONFIG.priority_extensions.count(p.priority)) {
-            extension = GLOBAL_CONFIG.priority_extensions[p.priority];
-        } else {
-            if (p.priority == 1) extension = 5;
-            else if (p.priority == 2) extension = 10;
-            else if (p.priority == 3) extension = 15;
-            else if (p.priority == 4) extension = 20;
-            else extension = 30;
-        }
-        p.latest_drop = base_latest + extension;
-        p.vehicle_pref = cols[8]; 
+        p.latest_drop     = (double)timeToMin(cols[7]); // store raw; extension applied in violation check
+
+        p.vehicle_pref = cols[8];
+        string vp = normalize(p.vehicle_pref);
+        p.pref_premium = (vp == "premium");
+
         p.capacity_pref = shareMap(cols[9]);
         passengers.push_back(p);
     }
@@ -631,9 +715,9 @@ vector<Vehicle> loadVehicles(string filename) {
         try { v.lon = stod(cols[7]); } catch(...) { v.lon = 0; }
         v.available_time = (double)timeToMin(cols[8]);
         
-        string catStr = cols[9];
-        if (catStr == "premium" || catStr == "Premium") v.category = "premium";
-        else if (catStr == "normal" || catStr == "Normal") v.category = "normal";
+        string catStr = normalize(cols[9]);
+        if (catStr == "premium") { v.category = "premium"; v.is_premium = true; }
+        else if (catStr == "normal") v.category = "normal";
         else v.category = "any";
         
         vehicles.push_back(v);
@@ -668,22 +752,21 @@ int main(int argc, char** argv) {
 
     fs::path metadata_path = base_dir / "metadata.csv";
     fs::path employees_path = base_dir / "employees.csv";
-    fs::path vehicles_path = base_dir / "vehicles.csv";
-    fs::path matrix_path = base_dir / "matrix.txt";
+    fs::path vehicles_path  = base_dir / "vehicles.csv";
+    fs::path matrix_path    = base_dir / "matrix.txt";
 
     cout << "Loading metadata from " << metadata_path << "..." << endl;
     loadMetadata(metadata_path.string());
 
     cout << "Loading passengers and vehicles..." << endl;
     vector<Passenger> passengers = loadPassengers(employees_path.string());
-    vector<Vehicle> vehicles = loadVehicles(vehicles_path.string());
+    vector<Vehicle>   vehicles   = loadVehicles(vehicles_path.string());
 
     if (passengers.empty() || vehicles.empty()) {
         cerr << "Error: No data loaded." << endl;
         return 1;
     }
 
-    // Calculate matrix size and load
     N = passengers.size();
     V = vehicles.size();
     int matrix_size = N + V + 1; // Employees + Vehicles + Office
@@ -697,11 +780,9 @@ int main(int argc, char** argv) {
 
     int n = passengers.size();
     vector<vector<double>> s_matrix(n, vector<double>(n));
-    for (int i = 0; i < n; i++) {
-        for (int j = 0; j < n; j++) {
+    for (int i = 0; i < n; i++)
+        for (int j = 0; j < n; j++)
             s_matrix[i][j] = (i == j) ? 0 : calculate_dissimilarity(passengers[i], passengers[j]);
-        }
-    }
 
     vector<vector<int>> best_config;
     best_config.push_back({});
@@ -715,7 +796,7 @@ int main(int argc, char** argv) {
         for (size_t i = 0; i < current_clusters.size(); i++) {
             if (current_clusters[i].size() <= 1) continue;
             double diam = 0;
-            for (int u : current_clusters[i]) for (int v : current_clusters[i]) diam = max(diam, s_matrix[u][v]);
+            for (int u : current_clusters[i]) for (int vv : current_clusters[i]) diam = max(diam, s_matrix[u][vv]);
             if (diam > max_diam) { max_diam = diam; target_idx = i; }
         }
         if (target_idx == -1) break;
@@ -764,13 +845,16 @@ int main(int argc, char** argv) {
     });
 
     RoutingEngineCommonDrop router;
-    double grand_total_dist = 0;
-    double grand_total_running_cost = 0; 
-    double grand_total_weighted_score = 0;
-    double grand_total_penalized_score = 0;
+
+    // Grand totals — matching hetero.cpp printSolution accumulators
+    double grand_total_dist           = 0;
+    double grand_total_monetary_cost  = 0;   // = sum of (dist * cost_per_km) per group
+    double grand_total_passenger_time = 0;   // = sum of actual ride times
+    double grand_total_weighted_score = 0;   // base objective
+    double grand_total_penalized_score= 0;
 
     fs::path outvehic_path = base_dir / "Clustering-Routing-DP-Solver/output_vehicle.csv";
-    fs::path outemp_path = base_dir / "Clustering-Routing-DP-Solver/output_employees.csv";
+    fs::path outemp_path   = base_dir / "Clustering-Routing-DP-Solver/output_employees.csv";
     
     ofstream outFileVeh(outvehic_path);
     ofstream outFileEmp(outemp_path);
@@ -781,88 +865,102 @@ int main(int argc, char** argv) {
     }
     
     cout << "Writing to: " << outvehic_path << endl;
-    cout << "Writing to: " << outemp_path << endl;
-    
-    outFileVeh << "vehicle_id,category,employee_id,pickup_time,drop_time" << endl;
+    cout << "Writing to: " << outemp_path   << endl;
+
+    // ---- OUTPUT FORMAT matching hetero.cpp ----
+    // vehicle CSV first line: base_objective,total_penalty
+    // (written after all groups processed so we buffer rows)
+    // employee CSV: plain header, then rows
     outFileEmp << "employee_id,pickup_time,drop_time" << endl;
+
+    // Buffer vehicle rows so we can prepend the summary line
+    vector<string> veh_rows;
 
     cout << "=== CLUSTERING & ROUTE GENERATION LOG ===" << endl;
 
     auto assign_group = [&](vector<Passenger>& grp) -> int {
         int b_veh = -1;
-        RouteResult b_res = {INF, INF, INF, INF, INF, INF, false, INF, INF, INF}; 
-        double b_penalized_penalized = INF;  // final score used for vehicle selection
+        RouteResult b_res;
+        b_res.penalized_score = INF;
 
-        for(size_t v=0; v<vehicles.size(); v++) {
-            if ((int)grp.size() > vehicles[v].capacity) continue;
+        for(size_t vi=0; vi<vehicles.size(); vi++) {
+            if ((int)grp.size() > vehicles[vi].capacity) continue;
             
+            // Vehicle type compatibility
             bool compatible = true;
-            string v_cat = normalize(vehicles[v].category);
+            string v_cat = normalize(vehicles[vi].category);
             for(const auto& p : grp) {
                 string p_pref = normalize(p.vehicle_pref);
                 if (p_pref != "any" && p_pref != v_cat) { compatible = false; break; }
             }
             if (!compatible) continue; 
 
-            RouteResult res = router.calculate_optimal_route(vehicles[v], grp);
+            RouteResult res = router.calculate_optimal_route(vehicles[vi], grp);
             
-            if(res.valid) {
-                // Wasted seat penalty remains as before, added on top of penalized_score
-                int wasted = vehicles[v].capacity - grp.size();
-                double penalty = wasted * 50.0 * GLOBAL_CONFIG.obj_cost_weight; 
-                // Use penalized_score (base + alpha/beta/gamma) for selection
-                double final_score = res.penalized_score + penalty;
+            // Use penalized_score for selection (valid or not — matching hetero behavior)
+            // Wasted-seat penalty added on top
+            int wasted = vehicles[vi].capacity - (int)grp.size();
+            double seat_penalty = wasted * 50.0 * GLOBAL_CONFIG.obj_cost_weight;
+            double final_score = res.penalized_score + seat_penalty;
 
-                if(final_score < b_penalized_penalized) {
-                    b_penalized_penalized = final_score; 
-                    b_res = res;
-                    b_veh = v;
-                }
+            if(final_score < b_res.penalized_score) {
+                b_res = res;
+                b_res.penalized_score = final_score; // store with seat penalty for selection
+                b_veh = vi;
             }
         }
         
         if (b_veh != -1) {
-             Vehicle& assigned_v = vehicles[b_veh];
-             auto schedule = router.get_schedule(assigned_v, grp);
-             string drop_time_str = minToTime((int)schedule.second);
-             for(auto& p_sched : schedule.first) {
+            // Restore true penalized_score (without seat penalty) for totals
+            RouteResult true_res = router.calculate_optimal_route(vehicles[b_veh], grp);
+
+            Vehicle& assigned_v = vehicles[b_veh];
+            auto schedule = router.get_schedule(assigned_v, grp);
+            string drop_time_str = minToTime((int)schedule.second);
+
+            for(auto& p_sched : schedule.first) {
                 string emp_id = grp[p_sched.first].original_id;
                 string pickup_time_str = minToTime((int)p_sched.second);
-                outFileVeh << assigned_v.original_id << "," << capitalize(assigned_v.category) << "," 
-                          << emp_id << "," << pickup_time_str << "," << drop_time_str << endl;
+
+                ostringstream row;
+                row << assigned_v.original_id << "," << capitalize(assigned_v.category) << ","
+                    << emp_id << "," << pickup_time_str << "," << drop_time_str;
+                veh_rows.push_back(row.str());
+
                 outFileEmp << emp_id << "," << pickup_time_str << "," << drop_time_str << endl;
-             }
+            }
              
-             cout << "  -> Assigned Vehicle: " << assigned_v.original_id << " (" << assigned_v.category << ")"
-                  << " Available: " << minToTime((int)assigned_v.available_time) << endl;
-             cout << "  -> Route Dist: " << fixed << setprecision(2) << b_res.cost_dist << " km" << endl;
-             cout << "  -> Money Cost: " << b_res.cost_money << endl;
-             cout << "  -> Pass. Time: " << b_res.passenger_time << " min" << endl;
-             
-             cout << "  -> Base Weighted Score: " << b_res.weighted_score 
-                  << " [ (" << b_res.cost_money << " * " << GLOBAL_CONFIG.obj_cost_weight << ") + ("
-                  << b_res.passenger_time << " * " << GLOBAL_CONFIG.obj_time_weight << ") ]" << endl;
+            cout << "  -> Assigned Vehicle: " << assigned_v.original_id
+                 << " (" << assigned_v.category << ")"
+                 << " Available: " << minToTime((int)assigned_v.available_time) << endl;
+            cout << "  -> Route Dist:   " << fixed << setprecision(2) << true_res.cost_dist << " km" << endl;
+            cout << "  -> Money Cost:   " << true_res.cost_money
+                 << "  [" << true_res.cost_dist << " km * " << assigned_v.cost_per_km << "/km]" << endl;
+            cout << "  -> Passenger Ride Time (sum): " << true_res.passenger_time << " min" << endl;
+            cout << "  -> Base Weighted Score: " << true_res.weighted_score
+                 << "  [(" << GLOBAL_CONFIG.obj_cost_weight << " * " << true_res.cost_money << ")"
+                 << " + (" << GLOBAL_CONFIG.obj_time_weight << " * " << true_res.passenger_time << ")]" << endl;
+            cout << "  -> Violations: RideTime=" << true_res.ride_time_violation
+                 << " TW=" << true_res.time_window_violation
+                 << " Cap=" << true_res.capacity_violation << endl;
+            cout << "  -> Penalized Score: " << true_res.penalized_score
+                 << "  [base + (alpha=" << GLOBAL_CONFIG.alpha << "*" << true_res.ride_time_violation << ")"
+                 << " + (beta=" << GLOBAL_CONFIG.beta << "*" << true_res.time_window_violation << ")"
+                 << " + (gamma=" << GLOBAL_CONFIG.gamma << "*" << true_res.capacity_violation << ")]" << endl;
+            cout << "  -> Completion: " << minToTime((int)true_res.finish_time) << endl;
+            cout << "  -> Feasible: " << (true_res.valid ? "YES" : "NO") << endl;
 
-             cout << "  -> Violations: RideTime=" << b_res.ride_time_violation
-                  << " TW=" << b_res.time_window_violation
-                  << " Cap=" << b_res.capacity_violation << endl;
+            // Update vehicle position for next group
+            assigned_v.lat = grp[0].d_lat;
+            assigned_v.lon = grp[0].d_lon;
+            assigned_v.available_time = true_res.finish_time;
 
-             cout << "  -> Penalized Score: " << b_res.penalized_score
-                  << " [ base + (alpha=" << GLOBAL_CONFIG.alpha << "*" << b_res.ride_time_violation << ")"
-                  << " + (beta=" << GLOBAL_CONFIG.beta << "*" << b_res.time_window_violation << ")"
-                  << " + (gamma=" << GLOBAL_CONFIG.gamma << "*" << b_res.capacity_violation << ") ]" << endl;
-
-             cout << "  -> Completion: " << minToTime((int)b_res.finish_time) << endl;
-
-             assigned_v.lat = grp[0].d_lat; 
-             assigned_v.lon = grp[0].d_lon;
-             assigned_v.available_time = b_res.finish_time; 
-             
-             grand_total_dist += b_res.cost_dist;
-             grand_total_running_cost += b_res.cost_money; 
-             grand_total_weighted_score += b_res.weighted_score;
-             grand_total_penalized_score += b_res.penalized_score;
-             return 1;
+            grand_total_dist            += true_res.cost_dist;
+            grand_total_monetary_cost   += true_res.cost_money;
+            grand_total_passenger_time  += true_res.passenger_time;
+            grand_total_weighted_score  += true_res.weighted_score;
+            grand_total_penalized_score += true_res.penalized_score;
+            return 1;
         }
         return 0;
     };
@@ -890,7 +988,8 @@ int main(int argc, char** argv) {
 
         cout << "  -> Group allocation failed. Retrying as individuals..." << endl;
         for (auto& p : cluster_passengers) {
-            cout << "\n[Cluster " << i+1 << " (Split)] Members: " << p.original_id << "(" << p.vehicle_pref << ") ";
+            cout << "\n[Cluster " << i+1 << " (Split)] Members: "
+                 << p.original_id << "(" << p.vehicle_pref << ") ";
             cout << "\n  -> Earliest Pickup Requirement: " << minToTime((int)p.earliest_pickup) << endl;
 
             vector<Passenger> single_grp = {p};
@@ -900,14 +999,33 @@ int main(int argc, char** argv) {
         }
     }
 
+    // ---- Write vehicle CSV: first line = base_objective,total_penalty (matching hetero) ----
+    double total_penalty = grand_total_penalized_score - grand_total_weighted_score;
+    outFileVeh << fixed << setprecision(1) << grand_total_weighted_score << "," << total_penalty << "\n";
+    outFileVeh << "vehicle_id,category,employee_id,pickup_time,drop_time" << endl;
+    for (auto& row : veh_rows) outFileVeh << row << endl;
+
     outFileVeh.close();
     outFileEmp.close();
-    cout << "\n===========================================" << endl;
-    cout << "TOTAL FLEET OPERATIONAL DISTANCE: " << fixed << setprecision(4) << grand_total_dist << " km" << endl;
-    cout << "TOTAL FLEET RUNNING COST: " << fixed << setprecision(2) << grand_total_running_cost << endl;
-    cout << "TOTAL BASE WEIGHTED SCORE: " << fixed << setprecision(2) << grand_total_weighted_score << endl;
-    cout << "TOTAL PENALIZED SCORE: " << fixed << setprecision(2) << grand_total_penalized_score << endl;
-    cout << "===========================================" << endl;
+
+    // ---- Final summary matching hetero.cpp printSolution ----
+    cout << "\n=============================================================\n";
+    cout << "                  FINAL METRICS BREAKDOWN                    \n";
+    cout << "=============================================================\n";
+    cout << left << setw(35) << "Total Distance:"
+         << fixed << setprecision(2) << grand_total_dist << " km\n";
+    cout << left << setw(35) << "Total Passenger Ride Time (sum):"
+         << fixed << setprecision(1) << grand_total_passenger_time << " min\n";
+    cout << left << setw(35) << "TOTAL MONETARY COST:"
+         << fixed << setprecision(2) << grand_total_monetary_cost << "\n";
+    cout << "=============================================================\n";
+    cout << "WEIGHTED OBJECTIVE FUNCTION:\n"
+         << "  (" << grand_total_monetary_cost << " * " << GLOBAL_CONFIG.obj_cost_weight << ") + "
+         << "(" << grand_total_passenger_time << " * " << GLOBAL_CONFIG.obj_time_weight << ") = "
+         << fixed << setprecision(2) << grand_total_weighted_score << "\n";
+    cout << "TOTAL PENALTY:    " << fixed << setprecision(2) << total_penalty << "\n";
+    cout << "TOTAL PENALIZED SCORE: " << fixed << setprecision(2) << grand_total_penalized_score << "\n";
+    cout << "=============================================================\n";
     cout << "Successfully created 'output_vehicle.csv' and 'output_employees.csv'" << endl;
     return 0;
 }
