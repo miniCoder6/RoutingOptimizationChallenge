@@ -2,6 +2,8 @@
 #include "params.h"
 #include <algorithm>
 #include <limits>
+#include <set>
+#include <iostream>
 
 double get_waiting_cost(double duration, char tariff_type, const DARPInstance &instance)
 {
@@ -592,4 +594,28 @@ std::pair<double, std::vector<int>> insert_request_best_position(
 
     route.stats_valid = false;
     return std::make_pair(best_cost, best_seq);
+}
+
+void validate_solution_integrity(const Solution &solution, const DARPInstance &instance)
+{
+    std::set<int> found_requests;
+    for (const auto &route : solution.routes)
+        for (int node_id : route.sequence)
+            if (node_id < (int)instance.nodes.size() &&
+                instance.nodes[node_id].type == NodeType::PICKUP)
+                found_requests.insert(instance.get_req_id_by_node(node_id));
+
+    for (int req_id : solution.unassigned_requests)
+        found_requests.insert(req_id);
+
+    if ((int)found_requests.size() != (int)instance.requests.size())
+    {
+        std::cerr << "INTEGRITY ERROR: " << found_requests.size()
+                  << " requests accounted for, expected " << instance.requests.size() << "\n";
+        for (const auto &req : instance.requests)
+        {
+            if (found_requests.find(req.id) == found_requests.end())
+                std::cerr << "  Missing request ID: " << req.id << "\n";
+        }
+    }
 }

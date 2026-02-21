@@ -58,6 +58,15 @@ int read_vehicle_data(std::string file_name, DARPInstance &instance)
         int capacity = std::stoi(capacity_str);
         double cost_per_km = std::stod(cost_per_km_str);
         double average_speed_kmph = std::stod(average_speed_kmph_str);
+
+        if (average_speed_kmph <= 0.0)
+        {
+            std::cerr << "WARNING: Vehicle " << vehicle_id_str
+                      << " has speed " << average_speed_kmph
+                      << " km/h — skipping (vehicle cannot operate)\n";
+            continue;
+        }
+
         double curr_lat = std::stod(curr_lat_str);
         double curr_lon = std::stod(curr_lon_str);
 
@@ -108,7 +117,22 @@ int read_vehicle_data(std::string file_name, DARPInstance &instance)
     return number_of_vehicles;
 }
 
-int read_employee_data(std::string file_name, DARPInstance &instance)
+int count_csv_data_rows(const std::string &file_name)
+{
+    std::ifstream file(file_name);
+    if (!file.is_open())
+        return 0;
+    std::string line;
+    std::getline(file, line); // skip header
+    int count = 0;
+    while (std::getline(file, line))
+        if (!line.empty())
+            count++;
+    return count;
+}
+
+int read_employee_data(std::string file_name, DARPInstance &instance,
+                       int pickup_offset, int delivery_offset)
 {
     int number_of_employees = 0;
     std::ifstream file(file_name);
@@ -189,8 +213,8 @@ int read_employee_data(std::string file_name, DARPInstance &instance)
         int mins2 = std::stoi(mins_str2);
         latest_drop = hrs2 * 60 + mins2; // Convert to minutes
 
-        int pid = 100 + employee_id;
-        int did = 200 + employee_id;
+        int pid = pickup_offset + employee_id;
+        int did = delivery_offset + employee_id;
 
         Node pickup_node(
             pid, NodeType::PICKUP,
@@ -296,7 +320,8 @@ void read_metadata(std::string file_name)
     file.close();
 }
 
-void loadMatrix(const std::string &filename, DARPInstance &instance, int num_employees, int num_vehicles)
+void loadMatrix(const std::string &filename, DARPInstance &instance, int num_employees, int num_vehicles,
+                int pickup_base, int delivery_base)
 {
     const int MATRIX_SIZE = num_employees + num_vehicles + 1; // Actual matrix file size
     const int NUM_EMPLOYEES = num_employees;
@@ -306,10 +331,10 @@ void loadMatrix(const std::string &filename, DARPInstance &instance, int num_emp
     // Create mapping from matrix index to VNS node ID
     std::vector<int> matrix_to_node_id(MATRIX_SIZE);
 
-    // Matrix indices 0..(NUM_EMPLOYEES-1) (employee pickups) → Node IDs 101..100+N
+    // Matrix indices 0..(NUM_EMPLOYEES-1) (employee pickups) → Node IDs [pickup_base+1..pickup_base+N]
     for (int i = 0; i < NUM_EMPLOYEES; i++)
     {
-        matrix_to_node_id[i] = 101 + i;
+        matrix_to_node_id[i] = pickup_base + 1 + i;
     }
 
     // Matrix indices NUM_EMPLOYEES..(NUM_EMPLOYEES+NUM_VEHICLES-1) (vehicle depots) → Node IDs 1..NUM_VEHICLES
@@ -319,10 +344,10 @@ void loadMatrix(const std::string &filename, DARPInstance &instance, int num_emp
     }
 
     // Office index - we'll handle this separately for deliveries
-    matrix_to_node_id[OFFICE_IDX] = 201; // Temporary mapping
+    matrix_to_node_id[OFFICE_IDX] = delivery_base + 1; // Temporary mapping
 
     // Find maximum node ID needed
-    int max_node_id = 200 + NUM_EMPLOYEES; // Highest delivery node
+    int max_node_id = delivery_base + NUM_EMPLOYEES; // Highest delivery node
     instance.fit_structures(max_node_id);
 
     // Initialize all distances to infinity
@@ -367,7 +392,7 @@ void loadMatrix(const std::string &filename, DARPInstance &instance, int num_emp
             if (i == OFFICE_IDX)
             {
                 // From office to other nodes - map to all delivery nodes
-                for (int d = 201; d <= 200 + NUM_EMPLOYEES; d++)
+                for (int d = delivery_base + 1; d <= delivery_base + NUM_EMPLOYEES; d++)
                 {
                     instance.distance_matrix[d][node_j] = dist;
                     instance.time_matrix[d][node_j] = dist;
@@ -376,7 +401,7 @@ void loadMatrix(const std::string &filename, DARPInstance &instance, int num_emp
             if (j == OFFICE_IDX)
             {
                 // From other nodes to office - map to all delivery nodes
-                for (int d = 201; d <= 200 + NUM_EMPLOYEES; d++)
+                for (int d = delivery_base + 1; d <= delivery_base + NUM_EMPLOYEES; d++)
                 {
                     instance.distance_matrix[node_i][d] = dist;
                     instance.time_matrix[node_i][d] = dist;
@@ -393,9 +418,9 @@ void loadMatrix(const std::string &filename, DARPInstance &instance, int num_emp
 
     // Special case: office to office (all delivery nodes to each other)
     double office_to_office = temp_matrix[OFFICE_IDX][OFFICE_IDX];
-    for (int d1 = 201; d1 <= 200 + NUM_EMPLOYEES; d1++)
+    for (int d1 = delivery_base + 1; d1 <= delivery_base + NUM_EMPLOYEES; d1++)
     {
-        for (int d2 = 201; d2 <= 200 + NUM_EMPLOYEES; d2++)
+        for (int d2 = delivery_base + 1; d2 <= delivery_base + NUM_EMPLOYEES; d2++)
         {
             instance.distance_matrix[d1][d2] = office_to_office;
             instance.time_matrix[d1][d2] = office_to_office;
@@ -405,9 +430,9 @@ void loadMatrix(const std::string &filename, DARPInstance &instance, int num_emp
     std::cout << "Matrix loaded and remapped: " << MATRIX_SIZE << "x" << MATRIX_SIZE
               << " → " << (max_node_id + 1) << "x" << (max_node_id + 1) << " (sparse)\n";
     std::cout << "Mapping:\n";
-    std::cout << "  Matrix [0-" << (NUM_EMPLOYEES - 1) << "]  (Employee Pickups) → Nodes [101-" << (100 + NUM_EMPLOYEES) << "]\n";
+    std::cout << "  Matrix [0-" << (NUM_EMPLOYEES - 1) << "]  (Employee Pickups) → Nodes [" << (pickup_base + 1) << "-" << (pickup_base + NUM_EMPLOYEES) << "]\n";
     std::cout << "  Matrix [" << NUM_EMPLOYEES << "-" << (NUM_EMPLOYEES + NUM_VEHICLES - 1) << "] (Vehicle Depots)   → Nodes [1-" << NUM_VEHICLES << "]\n";
-    std::cout << "  Matrix [" << OFFICE_IDX << "]   (Office)           → Nodes [201-" << (200 + NUM_EMPLOYEES) << "]\n";
+    std::cout << "  Matrix [" << OFFICE_IDX << "]   (Office)           → Nodes [" << (delivery_base + 1) << "-" << (delivery_base + NUM_EMPLOYEES) << "]\n";
 }
 
 // Helper: convert minutes since midnight to "HH:MM" string
@@ -512,7 +537,7 @@ void write_output_csvs(const Solution &solution, DARPInstance &instance, std::st
     // Write output_vehicles.csv
     // Format: vehicle_id,category,employee_id,pickup_time,drop_time
     {
-        std::ofstream fout(base + "/god/output_vehicle.csv", std::ios::trunc);
+        std::ofstream fout(base + "/god/output_vehicles.csv", std::ios::trunc);
         fout << "vehicle_id,category,employee_id,pickup_time,drop_time\n";
         for (const CSVRow &r : rows)
             fout << format_id('V', r.vehicle_id) << "," << r.category << "," << format_id('E', r.employee_id)

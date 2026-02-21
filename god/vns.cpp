@@ -73,6 +73,9 @@ bool neighborhood_move(Solution &solution, int h, DARPInstance &instance, RouteB
 
         backup_route(backups, source_idx, source_route);
 
+        // Save current sequence before erasing so we can restore just this step
+        std::vector<int> seq_before_erase = source_route.sequence;
+
         auto &seq = source_route.sequence;
         seq.erase(std::remove(seq.begin(), seq.end(), p_node_id), seq.end());
         seq.erase(std::remove(seq.begin(), seq.end(), d_node_id), seq.end());
@@ -88,7 +91,12 @@ bool neighborhood_move(Solution &solution, int h, DARPInstance &instance, RouteB
             }
         }
         if (potential_indices.empty())
+        {
+            // No compatible route — restore source route to pre-erase state
+            source_route.sequence = std::move(seq_before_erase);
+            source_route.stats_valid = false;
             continue;
+        }
 
         std::uniform_int_distribution<> dist_dest(0, potential_indices.size() - 1);
         int dest_idx = potential_indices[dist_dest(gen)];
@@ -301,6 +309,9 @@ bool neighborhood_chain(Solution &solution, int h, DARPInstance &instance, Route
 
         backup_route(backups, current_idx, *current);
 
+        // Save current sequence before erasing so we can restore just this step
+        std::vector<int> seq_before_erase = current->sequence;
+
         auto &seq = current->sequence;
         seq.erase(std::remove(seq.begin(), seq.end(), p_node_id), seq.end());
         seq.erase(std::remove(seq.begin(), seq.end(), d_node_id), seq.end());
@@ -317,7 +328,12 @@ bool neighborhood_chain(Solution &solution, int h, DARPInstance &instance, Route
             }
         }
         if (potential_indices.empty())
+        {
+            // No compatible route — restore current route to pre-erase state
+            current->sequence = std::move(seq_before_erase);
+            current->stats_valid = false;
             break;
+        }
 
         std::uniform_int_distribution<> dist_dest(0, potential_indices.size() - 1);
         int dest_idx = potential_indices[dist_dest(gen)];
@@ -596,6 +612,8 @@ Solution vns1(
 
         current_iteration++;
     }
+
+    validate_solution_integrity(current, instance);
 
     return current;
 }

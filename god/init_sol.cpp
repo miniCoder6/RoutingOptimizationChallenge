@@ -39,6 +39,9 @@ Solution initial_solution(DARPInstance &instance)
             if (!(req.compatible_vehicle_types & (1u << route.vehicle->type_id)))
                 continue;
 
+            if (route.vehicle->average_speed <= 0.0)
+                continue;
+
             int depot_id = route.vehicle->depot_id;
             double d = instance.get_dist(depot_id, req.pickup_node.id);
 
@@ -70,6 +73,9 @@ Solution initial_solution(DARPInstance &instance)
                     continue;
 
                 if (!(req.compatible_vehicle_types & (1u << route.vehicle->type_id)))
+                    continue;
+
+                if (route.vehicle->average_speed <= 0.0)
                     continue;
 
                 int last_node = route.sequence.back();
@@ -104,6 +110,9 @@ Solution initial_solution(DARPInstance &instance)
                 if (!(req.compatible_vehicle_types & (1u << route.vehicle->type_id)))
                     continue;
 
+                if (route.vehicle->average_speed <= 0.0)
+                    continue;
+
                 // Placeholder: you will implement this
                 auto result = insert_request_best_position(
                     route, req, instance,
@@ -120,7 +129,7 @@ Solution initial_solution(DARPInstance &instance)
                 }
             }
 
-            if (best_route)
+            if (best_route && !best_sequence.empty())
             {
                 best_route->sequence = best_sequence;
                 assigned = true;

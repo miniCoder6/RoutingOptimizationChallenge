@@ -11,7 +11,6 @@
 
 int main(int argc, char *argv[])
 {
-
     std::string base = argv[1];
 
     std::string vehicle_file = base + "/vehicles.csv";
@@ -29,10 +28,18 @@ int main(int argc, char *argv[])
     read_metadata(metadata_file);
 
     int num_vehicles = read_vehicle_data(vehicle_file, instance);
-    int num_employees = read_employee_data(employee_file, instance);
 
-    // Load and remap the 12x12 matrix to VNS node ID space
-    loadMatrix(matrix_file, instance, num_employees, num_vehicles);
+    // Pre-count employees to compute offsets before assigning IDs
+    int num_employees_expected = count_csv_data_rows(employee_file);
+    int pickup_offset = num_vehicles;
+    int delivery_offset = num_vehicles + num_employees_expected;
+
+    int num_employees = read_employee_data(employee_file, instance,
+                                           pickup_offset, delivery_offset);
+
+    // Load and remap the matrix to VNS node ID space
+    loadMatrix(matrix_file, instance, num_employees, num_vehicles,
+               pickup_offset, delivery_offset);
 
     std::cout << "Loaded " << num_vehicles << " vehicles, "
               << num_employees << " employees.\n";
@@ -91,6 +98,7 @@ int main(int argc, char *argv[])
     std::cout << "Total distance:   " << total_distance << "\n";
     std::cout << "Total duration:   " << total_duration << "\n";
     std::cout << "Objective cost:   " << objective_cost << "\n";
+
     write_output_csvs(best, instance, base);
 
     auto end = std::chrono::high_resolution_clock::now();

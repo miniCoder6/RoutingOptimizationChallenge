@@ -21,3 +21,6 @@ double calculate_route_cost_delta(Route &route, DARPInstance &instance, double a
 // Tries to insert request (Pickup P, Delivery D) into route.
 // Finds position minimizing cost increase.
 std::pair<double, std::vector<int>> insert_request_best_position(Route &route, const Request &request, DARPInstance &instance, double alpha, double beta, double gamma);
+
+// Validates that all requests are accounted for in routes + unassigned list
+void validate_solution_integrity(const Solution &solution, const DARPInstance &instance);
