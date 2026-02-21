@@ -11,6 +11,7 @@
 #include <limits>
 #include <random>
 #include <filesystem>
+#include <chrono>
 
 namespace fs = std::filesystem;
 
@@ -536,8 +537,11 @@ int main(int argc, char **argv)
     int max_iter = 100000;
     int k_max = 2;
 
+    auto st = std::chrono::high_resolution_clock::now();
+
     for (int iter = 0; iter < max_iter; iter++)
     {
+
         int k = 1;
         while (k <= k_max)
         {
@@ -558,6 +562,14 @@ int main(int argc, char **argv)
             {
                 k++;
             }
+        }
+
+        auto curr = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<double> el = curr - st;
+
+        if (el.count() > 12)
+        {
+            break;
         }
     }
 
@@ -582,7 +594,7 @@ int main(int argc, char **argv)
     // --- Output CSVs ---
     fs::path veh_out_path = base_dir / "Variable_Neighbourhood_Search/output_vehicle.csv";
     ofstream outFileVeh(veh_out_path);
-    outFileVeh << fixed << setprecision(3) << final_obj - final_penalty << "," << final_obj << endl;
+    outFileVeh << fixed << setprecision(3) << final_obj - final_penalty << "," << final_penalty << endl;
     outFileVeh << "vehicle_id,category,employee_id,pickup_time,drop_time" << endl;
 
     struct EmpRecord

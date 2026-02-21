@@ -42,8 +42,9 @@ int getPriorityDelay(int priority)
     return PRIORITY_DELAY[0];
 }
 
-double INFEASIBILITY_PENALTY = 10000.0;
-
+double INFEASIBILITY_PENALTY = 100000.0;
+double PENALTY_PREMIUM_VEHICLE = 500000.0;
+double PENALTY_SHARING_PREFERENCE = 500000.0;
 // =================== ENUMS & HELPERS ===================
 
 enum VehicleCat
@@ -416,6 +417,7 @@ ImportedSolution readCSVSolution(const string &filename,
 
     string line;
     getline(file, line); // skip header
+    getline(file, line);
 
     vector<ParsedRow> rows;
     set<int> seenEmp;
@@ -569,28 +571,29 @@ void evaluateImported(Chromosome &chromo,
 
         // Penalty
         double penalty = 0.0;
-        const double EPSILON = 5; // Tolerance for floating point precision
+        const double EPSILON = 5;
+        int groupSize = customers.size();
 
         for (size_t k = 0; k < customers.size(); k++)
         {
             int pIdx = customers[k];
 
-            // 1. Check Late Drop Penalty
             double allowedLateDrop = (double)persons[pIdx].late_drop + (double)getPriorityDelay(persons[pIdx].priority);
             if (arrivalOffice > allowedLateDrop + EPSILON)
             {
                 penalty += INFEASIBILITY_PENALTY * (arrivalOffice - allowedLateDrop);
-                cout << pIdx << " " << penalty << endl;
+                cout << pIdx << " " << penalty << "\n";
             }
 
-            // 2. Check Ride Time Delay Penalty
-            // double rideTime = arrivalOffice - pickupTimes[k];
-            // double directTime = getTravelTime(personMatId(pIdx), OFFICE_ID, d.speed_kmph);
-            // double delay = rideTime - directTime;
-            // double allowed = (double)getPriorityDelay(persons[pIdx].priority);
+            if (groupSize > persons[pIdx].max_sharing)
+            {
+                penalty += PENALTY_SHARING_PREFERENCE;
+            }
 
-            // if (delay > allowed + EPSILON)
-            //     penalty += INFEASIBILITY_PENALTY * (delay - allowed);
+            if (persons[pIdx].pref_vehicle == PREMIUM && d.category != PREMIUM)
+            {
+                penalty += PENALTY_PREMIUM_VEHICLE;
+            }
         }
 
         double totalRideTime = 0.0;
@@ -673,17 +676,25 @@ void splitProcedure(Chromosome &chromo,
             currentLoad += persons[custIdx].load;
             int currentGroupSize = (j - i);
 
-            bool sharingViolation = false;
+            // bool sharingViolation = false;
+            // for (int p = i; p < j; p++)
+            // {
+            //     if (currentGroupSize > persons[chromo.giantTour[p]].max_sharing)
+            //     {
+            //         sharingViolation = true;
+            //         break;
+            //     }
+            // }
+            // if (sharingViolation)
+            //     break;
+            double sharingPenalty = 0.0;
             for (int p = i; p < j; p++)
             {
                 if (currentGroupSize > persons[chromo.giantTour[p]].max_sharing)
                 {
-                    sharingViolation = true;
-                    break;
+                    sharingPenalty += PENALTY_SHARING_PREFERENCE;
                 }
             }
-            if (sharingViolation)
-                break;
 
             if (prevCustIdx == -1)
                 currentRouteDist = 0.0;
@@ -702,18 +713,26 @@ void splitProcedure(Chromosome &chromo,
                 if (d.capacity < currentLoad)
                     continue;
 
-                bool prefFail = false;
+                // bool prefFail = false;
+                // for (int p = i; p < j; p++)
+                // {
+                //     if (persons[chromo.giantTour[p]].pref_vehicle == PREMIUM &&
+                //         d.category != PREMIUM)
+                //     {
+                //         prefFail = true;
+                //         break;
+                //     }
+                // }
+                // if (prefFail)
+                //     continue;
+                double vehiclePenalty = 0.0;
                 for (int p = i; p < j; p++)
                 {
-                    if (persons[chromo.giantTour[p]].pref_vehicle == PREMIUM &&
-                        d.category != PREMIUM)
+                    if (persons[chromo.giantTour[p]].pref_vehicle == PREMIUM && d.category != PREMIUM)
                     {
-                        prefFail = true;
-                        break;
+                        vehiclePenalty += PENALTY_PREMIUM_VEHICLE;
                     }
                 }
-                if (prefFail)
-                    continue;
 
                 int firstCust = chromo.giantTour[i];
                 double availTime = V[i].driverAvailTimes[k];
@@ -747,8 +766,8 @@ void splitProcedure(Chromosome &chromo,
                 double travelToOffice = getTravelTime(personMatId(tempPrev), OFFICE_ID, d.speed_kmph);
                 double arrivalAtOffice = currentVisTime + travelToOffice;
 
-                double penalty = 0.0;
-                const double EPSILON = 1e-5; // Tolerance for floating point precision
+                double penalty = sharingPenalty + vehiclePenalty;
+                const double EPSILON = 1e-5;
 
                 for (int p = i; p < j; p++)
                 {

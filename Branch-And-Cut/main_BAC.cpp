@@ -304,7 +304,7 @@ void printSolution(const Solver::Solution &sol,
     {
         fs::path veh_out_path = base_dir / "Branch-And-Cut/output_vehicle.csv";
         std::ofstream fout(veh_out_path);
-        fout << costt << "," << pen + costt << "\n";
+        fout << costt << "," << pen << "\n";
         fout << "vehicle_id,category,employee_id,pickup_time,drop_time\n";
         for (auto &r : vehicle_csv_rows)
             fout << r.vehicle_id << "," << r.category << "," << r.employee_id << "," << r.pickup_time << "," << r.drop_time << "\n";
@@ -335,6 +335,7 @@ std::vector<Vehicle> loadVehicles(const std::string &filename)
     std::getline(file, line); // Skip header row
 
     int sequential_id = 1; // Solver expects 1-based indexing for vehicles
+    int nn = 0;
 
     while (std::getline(file, line))
     {
@@ -397,7 +398,10 @@ std::vector<Vehicle> loadVehicles(const std::string &filename)
         v.avg_speed_kmh = std::stod(row[5]);
 
         vehicles.push_back(v);
+        tot_speed_per_km += v.cost_per_km;
+        nn++;
     }
+    avg_speed_per_km = tot_speed_per_km / nn;
     std::cout << "Loaded " << vehicles.size() << " vehicles from " << filename << "\n";
     return vehicles;
 }
@@ -566,6 +570,7 @@ int main(int argc, char **argv)
     // --- 3. SET COSTS & SOLVE ---
     solver.dist_cost = dist_cost;
     solver.time_cost = time_cost;
+    tm_cost = time_cost;
 
     // std::vector<Solver::Solution> init_sols;
     // init_sols.reserve(1000);

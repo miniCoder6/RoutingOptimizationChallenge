@@ -46,7 +46,7 @@ std::string minToTime(int m)
 }
 
 // Helper to convert HH:MM string to minutes
-int timeStringToMin(const std::string& t_str)
+int timeStringToMin(const std::string &t_str)
 {
     if (t_str.empty())
         return 0;
@@ -69,9 +69,12 @@ std::string capitalize(std::string s)
 
 int allowedLoad(const std::string &pref)
 {
-    if (pref == "single") return 1;
-    if (pref == "double") return 2;
-    if (pref == "triple") return 3;
+    if (pref == "single")
+        return 1;
+    if (pref == "double")
+        return 2;
+    if (pref == "triple")
+        return 3;
     return 1000;
 }
 
@@ -80,11 +83,16 @@ struct Config
     double cost_weight = 1.0;
     double time_weight = 0.0;
 
+<<<<<<< HEAD
     double alpha = 25000.0;;   // Ride Time Penalty
     double beta = 100000.0;   // Time Window Penalty
+=======
+    double alpha = 100000.0; // Ride Time Penalty
+    double beta = 1000.0;    // Time Window Penalty
+>>>>>>> c2ab57f (fixed speed related issues)
     double gamma = 500000.0; // Capacity/Sharing Penalty
 
-    std::vector<int> max_delays = {0, 10, 20, 30, 45, 60}; 
+    std::vector<int> max_delays = {0, 10, 20, 30, 45, 60};
 };
 
 enum NodeType
@@ -107,9 +115,9 @@ struct Request
 
     bool pref_premium = false;
     int max_sharing = 1000;
-    
+
     // NEW: Integer ID for O(1) matrix lookup
-    int matrix_id = -1; 
+    int matrix_id = -1;
 };
 
 struct Vehicle
@@ -124,9 +132,9 @@ struct Vehicle
     std::string category;
 
     bool is_premium = false;
-    
+
     // NEW: Integer ID for O(1) matrix lookup
-    int matrix_id = -1; 
+    int matrix_id = -1;
 };
 
 struct Node
@@ -161,7 +169,8 @@ void loadMetadata(const std::string &filename, Config &config)
     std::string line;
     std::getline(file, line);
 
-    if (config.max_delays.size() < 6) config.max_delays.resize(6, 999);
+    if (config.max_delays.size() < 6)
+        config.max_delays.resize(6, 999);
 
     while (std::getline(file, line))
     {
@@ -174,13 +183,20 @@ void loadMetadata(const std::string &filename, Config &config)
         key.erase(std::remove(key.begin(), key.end(), '\r'), key.end());
         valStr.erase(std::remove(valStr.begin(), valStr.end(), '\r'), valStr.end());
 
-        if (key == "priority_1_max_delay_min") config.max_delays[1] = std::stoi(valStr);
-        else if (key == "priority_2_max_delay_min") config.max_delays[2] = std::stoi(valStr);
-        else if (key == "priority_3_max_delay_min") config.max_delays[3] = std::stoi(valStr);
-        else if (key == "priority_4_max_delay_min") config.max_delays[4] = std::stoi(valStr);
-        else if (key == "priority_5_max_delay_min") config.max_delays[5] = std::stoi(valStr);
-        else if (key == "objective_cost_weight") config.cost_weight = std::stod(valStr);
-        else if (key == "objective_time_weight") config.time_weight = std::stod(valStr);
+        if (key == "priority_1_max_delay_min")
+            config.max_delays[1] = std::stoi(valStr);
+        else if (key == "priority_2_max_delay_min")
+            config.max_delays[2] = std::stoi(valStr);
+        else if (key == "priority_3_max_delay_min")
+            config.max_delays[3] = std::stoi(valStr);
+        else if (key == "priority_4_max_delay_min")
+            config.max_delays[4] = std::stoi(valStr);
+        else if (key == "priority_5_max_delay_min")
+            config.max_delays[5] = std::stoi(valStr);
+        else if (key == "objective_cost_weight")
+            config.cost_weight = std::stod(valStr);
+        else if (key == "objective_time_weight")
+            config.time_weight = std::stod(valStr);
     }
 }
 
@@ -213,16 +229,19 @@ std::vector<Vehicle> loadVehicles(const std::string &filename)
         v.id = sequential_id++;
         v.original_id = row[0];
         std::string catStr = row[9];
-        
-        if (catStr == "premium" || catStr == "Premium") {
+
+        if (catStr == "premium" || catStr == "Premium")
+        {
             v.category = "premium";
             v.is_premium = true;
         }
-        else if (catStr == "normal" || catStr == "Normal") {
+        else if (catStr == "normal" || catStr == "Normal")
+        {
             v.category = "normal";
         }
-        else v.category = "any";
-        
+        else
+            v.category = "any";
+
         try
         {
             v.capacity = std::stoi(row[3]);
@@ -251,7 +270,7 @@ std::vector<Request> loadRequests(const std::string &filename, const std::vector
     std::string line;
     std::getline(file, line);
     int sequential_id = 0;
-    
+
     while (std::getline(file, line))
     {
         if (line.empty())
@@ -284,15 +303,16 @@ std::vector<Request> loadRequests(const std::string &filename, const std::vector
         {
             continue;
         }
-        
+
         r.vehicle_pref = row[8];
         std::transform(r.vehicle_pref.begin(), r.vehicle_pref.end(), r.vehicle_pref.begin(), ::tolower);
-        if (r.vehicle_pref == "premium") r.pref_premium = true;
+        if (r.vehicle_pref == "premium")
+            r.pref_premium = true;
 
         r.sharing_pref = row[9];
         std::transform(r.sharing_pref.begin(), r.sharing_pref.end(), r.sharing_pref.begin(), ::tolower);
         r.max_sharing = allowedLoad(r.sharing_pref);
-        
+
         requests.push_back(r);
     }
     std::cout << "Loaded " << requests.size() << " requests from " << filename << "\n";
@@ -300,28 +320,33 @@ std::vector<Request> loadRequests(const std::string &filename, const std::vector
 }
 
 // NEW: Build the O(1) Matrix
-void buildFastMatrix(std::vector<Vehicle>& vehicles, std::vector<Request>& requests) {
+void buildFastMatrix(std::vector<Vehicle> &vehicles, std::vector<Request> &requests)
+{
     int total_nodes = vehicles.size() + requests.size() + 1;
     fast_distance.assign(total_nodes, std::vector<double>(total_nodes, 0.0));
-    
+
     std::vector<std::string> id_to_str(total_nodes);
     int current_id = 0;
-    
-    for (auto& v : vehicles) {
+
+    for (auto &v : vehicles)
+    {
         v.matrix_id = current_id;
         id_to_str[current_id++] = v.original_id;
     }
-    for (auto& r : requests) {
+    for (auto &r : requests)
+    {
         r.matrix_id = current_id;
         id_to_str[current_id++] = r.original_id;
     }
-    
+
     office_matrix_id = current_id;
     id_to_str[current_id++] = "OFFICE";
-    
+
     // Call the external string-based function exactly ONCE per pair
-    for (int i = 0; i < total_nodes; ++i) {
-        for (int j = 0; j < total_nodes; ++j) {
+    for (int i = 0; i < total_nodes; ++i)
+    {
+        for (int j = 0; j < total_nodes; ++j)
+        {
             fast_distance[i][j] = getDistanceFromMatrix(id_to_str[i], id_to_str[j]);
         }
     }
@@ -337,7 +362,7 @@ class Route
 public:
     int vehicle_index;
     std::vector<Node> sequence;
-    std::set<int> served_employees; 
+    std::set<int> served_employees;
 
     Route(int v_idx) : vehicle_index(v_idx) {}
 
@@ -354,8 +379,8 @@ public:
         int current_load = 0;
 
         std::vector<double> pickup_times(requests.size(), 0.0);
-        std::vector<int> onboard; 
-        onboard.reserve(veh.capacity + 2); 
+        std::vector<int> onboard;
+        onboard.reserve(veh.capacity + 2);
 
         RouteMetrics m = {true, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
 
@@ -390,16 +415,16 @@ public:
                 if (current_load > veh.capacity)
                     m.capacity_violation += (current_load - veh.capacity);
                 if (req.pref_premium && !veh.is_premium)
-                    m.capacity_violation += 10000; 
-
+                    m.capacity_violation += 10000;
             }
             else
-            { 
+            {
                 double drop_time = current_time;
                 current_load--;
-                
+
                 auto it = std::find(onboard.begin(), onboard.end(), node.emp_index);
-                if (it != onboard.end()) onboard.erase(it);
+                if (it != onboard.end())
+                    onboard.erase(it);
 
                 int buffer = (req.priority < config.max_delays.size()) ? config.max_delays[req.priority] : 0;
 
@@ -510,7 +535,7 @@ public:
                     std::vector<int> emps(route.served_employees.begin(), route.served_employees.end());
                     std::uniform_int_distribution<int> dist(0, emps.size() - 1);
                     int emp_to_remove = emps[dist(rng)];
-                    
+
                     std::vector<Node> new_seq;
                     for (auto &n : route.sequence)
                         if (n.emp_index != emp_to_remove)
@@ -577,7 +602,7 @@ public:
         for (size_t i = 0; i < requests.size(); ++i)
             sorted_indices[i] = i;
         std::sort(sorted_indices.begin(), sorted_indices.end(), [&](int a, int b)
-             { return requests[a].earliest_pickup < requests[b].earliest_pickup; });
+                  { return requests[a].earliest_pickup < requests[b].earliest_pickup; });
 
         for (int emp_idx : sorted_indices)
         {
@@ -677,23 +702,23 @@ public:
             }
             if (current_active.empty())
                 break;
-            
+
             std::uniform_int_distribution<int> active_dist(0, current_active.size() - 1);
             int r_idx = current_active[active_dist(rng)];
-            
+
             if (sol.routes[r_idx].served_employees.empty())
                 continue;
             auto it = sol.routes[r_idx].served_employees.begin();
             std::advance(it, rng() % sol.routes[r_idx].served_employees.size());
             int emp = *it;
-            
+
             std::vector<Node> new_seq;
             for (auto &n : sol.routes[r_idx].sequence)
                 if (n.emp_index != emp)
                     new_seq.push_back(n);
             sol.routes[r_idx].sequence = new_seq;
             sol.routes[r_idx].served_employees.erase(emp);
-            
+
             std::uniform_int_distribution<int> route_dist(0, sol.routes.size() - 1);
             int dest = route_dist(rng);
             sol.routes[dest].sequence.push_back({PICKUP, emp, 0, 0});
@@ -712,10 +737,10 @@ public:
         for (int iter = 0; iter < max_iterations; ++iter)
         {
             iterations_done = iter + 1;
-            
-            Solution s_prime = current_sol; 
+
+            Solution s_prime = current_sol;
             shaking(s_prime, k);
-            
+
             localSearch(s_prime);
             repair(s_prime);
             s_prime.calculateTotalScore(vehicles, requests, config);
@@ -786,11 +811,11 @@ int main(int argc, char **argv)
 
     N = requests.size();
     V = vehicles.size();
-    int matrix_size = N + V + 1; 
+    int matrix_size = N + V + 1;
 
     std::cout << "Loading matrix from " << matrix_path << " (Expecting " << matrix_size << "x" << matrix_size << ")...\n";
     loadMatrix(matrix_path.string(), matrix_size);
-    
+
     // NEW: Build the O(1) Matrix right after loading
     std::cout << "Building fast lookup matrix...\n";
     buildFastMatrix(vehicles, requests);
@@ -801,12 +826,14 @@ int main(int argc, char **argv)
 
     Solution final_solution = solver.solve(5000, iterations_done);
     double final_base_obj = 0.0;
-    for (auto& r : final_solution.routes) {
-        if (r.served_employees.empty()) continue;
-        
+    for (auto &r : final_solution.routes)
+    {
+        if (r.served_employees.empty())
+            continue;
+
         RouteMetrics m = r.evaluate(vehicles, requests, config);
         final_base_obj += (config.cost_weight * m.total_cost) + (config.time_weight * m.total_time);
-    } 
+    }
 
     std::cout << "Final Objective: " << std::fixed << std::setprecision(1) << final_base_obj << "\n";
     std::cout << "Final Total Score (With Penalties): " << std::fixed << std::setprecision(1) << final_solution.total_score << "\n";

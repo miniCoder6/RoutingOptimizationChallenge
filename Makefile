@@ -6,7 +6,7 @@ CXXFLAGS := -std=c++17 -pthread -Wall -O3 -Iasio-1.28.0/include -DASIO_STANDALON
 # ---------------- CONFIGURATION ----------------
 # 1. List your subdirectory names here (space separated)
 # This ensures 'make' goes into these folders and compiles the solvers first
-SUBDIRS  := ALNS Branch-And-Cut Heterogeneous_DARP Variable_Neighbourhood_Search god memetic_algorithm
+SUBDIRS  := ALNS Branch-And-Cut Heterogeneous_DARP Variable_Neighbourhood_Search god memetic_algorithm Clustering-Routing-DP-Solver
 
 # 2. Name your final server executable
 TARGET   := server_app

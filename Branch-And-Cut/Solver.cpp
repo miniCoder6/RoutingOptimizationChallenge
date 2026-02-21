@@ -380,6 +380,7 @@ Solver::Solution Solver::solveDeterministicAnnealing()
     int no_improve_global = 0;
 
     std::cout << "Starting DA. Init Cost: " << current_sol.total_cost << " | T_max: " << t_max << "\n";
+    auto st = std::chrono::high_resolution_clock::now();
 
     int no_improve_iter = 0;
 
@@ -473,6 +474,14 @@ Solver::Solution Solver::solveDeterministicAnnealing()
             TT = initial_t * 0.15;
             // TT = initial_t;
             no_improve_global = 0;
+        }
+
+        auto current_time = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<double> elapsed = current_time - st;
+
+        if (elapsed.count() >= 12)
+        {
+            break;
         }
     }
 
