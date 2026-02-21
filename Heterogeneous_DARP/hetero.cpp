@@ -83,19 +83,9 @@ struct Config
     double cost_weight = 1.0;
     double time_weight = 0.0;
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-    double alpha = 25000.0;;   // Ride Time Penalty
-    double beta = 100000.0;   // Time Window Penalty
-=======
-    double alpha = 100000.0; // Ride Time Penalty
-    double beta = 1000.0;    // Time Window Penalty
->>>>>>> c2ab57f (fixed speed related issues)
-=======
     double alpha = 25000.0;
     ;                        // Ride Time Penalty
     double beta = 100000.0;  // Time Window Penalty
->>>>>>> cda2e79 (Fixed bugs)
     double gamma = 500000.0; // Capacity/Sharing Penalty
 
     std::vector<int> max_delays = {0, 10, 20, 30, 45, 60};
@@ -368,11 +358,7 @@ class Route
 public:
     int vehicle_index;
     std::vector<Node> sequence;
-<<<<<<< HEAD
-    std::set<int> served_employees;
-=======
     std::vector<int> served_employees; // PERF: changed from std::set<int> for better cache locality and O(1) random access
->>>>>>> cda2e79 (Fixed bugs)
 
     Route(int v_idx) : vehicle_index(v_idx) {}
 
@@ -430,13 +416,6 @@ public:
             {
                 double drop_time = current_time;
                 current_load--;
-<<<<<<< HEAD
-
-                auto it = std::find(onboard.begin(), onboard.end(), node.emp_index);
-                if (it != onboard.end())
-                    onboard.erase(it);
-=======
->>>>>>> cda2e79 (Fixed bugs)
 
                 // PERF: swap-with-back + pop_back instead of find + erase (avoids shifting)
                 auto it = std::find(onboard.begin(), onboard.end(), node.emp_index);
@@ -667,15 +646,9 @@ public:
 
                 if (!m.feasible && !route.served_employees.empty())
                 {
-<<<<<<< HEAD
-                    std::vector<int> emps(route.served_employees.begin(), route.served_employees.end());
-                    std::uniform_int_distribution<int> dist(0, emps.size() - 1);
-                    int emp_to_remove = emps[dist(rng)];
-=======
                     // PERF: direct index access on vector (was std::advance on set iterator)
                     std::uniform_int_distribution<int> dist(0, route.served_employees.size() - 1);
                     int emp_to_remove = route.served_employees[dist(rng)];
->>>>>>> cda2e79 (Fixed bugs)
 
                     std::vector<Node> new_seq;
                     for (auto &n : route.sequence)
@@ -863,25 +836,16 @@ public:
 
             if (sol.routes[r_idx].served_employees.empty())
                 continue;
-<<<<<<< HEAD
-            auto it = sol.routes[r_idx].served_employees.begin();
-            std::advance(it, rng() % sol.routes[r_idx].served_employees.size());
-            int emp = *it;
-=======
 
             // PERF: direct index access on vector (was std::advance on set iterator)
             std::uniform_int_distribution<int> emp_dist(0, sol.routes[r_idx].served_employees.size() - 1);
             int emp = sol.routes[r_idx].served_employees[emp_dist(rng)];
->>>>>>> cda2e79 (Fixed bugs)
 
             std::vector<Node> new_seq;
             for (auto &n : sol.routes[r_idx].sequence)
                 if (n.emp_index != emp)
                     new_seq.push_back(n);
             sol.routes[r_idx].sequence = new_seq;
-<<<<<<< HEAD
-            sol.routes[r_idx].served_employees.erase(emp);
-=======
 
             // PERF: swap-with-back + pop_back for O(1) vector removal (was set::erase)
             auto it = std::find(sol.routes[r_idx].served_employees.begin(), sol.routes[r_idx].served_employees.end(), emp);
@@ -890,7 +854,6 @@ public:
                 *it = sol.routes[r_idx].served_employees.back();
                 sol.routes[r_idx].served_employees.pop_back();
             }
->>>>>>> cda2e79 (Fixed bugs)
 
             std::uniform_int_distribution<int> route_dist(0, sol.routes.size() - 1);
             int dest = route_dist(rng);
