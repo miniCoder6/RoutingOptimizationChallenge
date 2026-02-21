@@ -11,6 +11,10 @@ static double priorityPenalty(int p){
 
 CostComponents getRouteCostComponents(const Route& r, const Vehicle& v, const std::vector<Employee>& emp, const Metadata& meta){
     CostComponents cc = {0.0, 0.0, 0.0};
+    if(v.speed <=0.0) {
+        cc={1e100,1e100,1e100};
+        return cc;
+    }
     if (r.seq.empty()) return cc;
 
     std::vector<double> pickupTime(emp.size(), -1); //1
@@ -141,4 +145,5 @@ double routeCost(const Route& r, const Vehicle& v, const std::vector<Employee>& 
     r.isDirty = false;
     return r.cachedCost;
 }
+
 
