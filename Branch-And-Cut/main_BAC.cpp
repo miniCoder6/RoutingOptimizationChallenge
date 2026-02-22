@@ -553,6 +553,24 @@ int main(int argc, char **argv)
 
     N = requests.size();
     V = vehicles.size();
+
+    // -----------------------------------------------------------------------
+    // Register matrix IDs BEFORE loadMatrix().
+    // The order here must exactly match the row/column order in matrix.txt.
+    // Convention: employees in CSV order (cols 0..N-1),
+    //             vehicles  in CSV order (cols N..N+V-1),
+    //             OFFICE as the last column (col N+V).
+    //
+    // This is the single source of truth for ID->index mapping.
+    // It works correctly for any ID format: E1, E123, non-consecutive, etc.
+    // -----------------------------------------------------------------------
+    for (int i = 0; i < N; ++i)
+        registerMatrixId(requests[i].original_id, i); // E1->0, E123->1, etc.
+    for (int k = 0; k < V; ++k)
+        registerMatrixId(vehicles[k].original_id, N + k); // V3->N+0, V7->N+1, etc.
+    registerOfficeIdx(N + V);                             // OFFICE is always last
+    registerMatrixId("OFFICE", N + V);                    // also reachable by string
+
     loadMatrix(matrix_path.string(), N + V + 1);
     auto begin = std::chrono::high_resolution_clock::now();
 

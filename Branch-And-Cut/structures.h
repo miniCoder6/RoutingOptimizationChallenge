@@ -47,11 +47,11 @@ struct Request
         if (veh_pref == CATEGORY_ANY)
             return true;
 
-        // Normal Req: Can use Normal OR Premium (Free upgrade allowed)
         if (veh_pref == CATEGORY_NORMAL)
-            return (v_cat == CATEGORY_NORMAL || v_cat == CATEGORY_PREMIUM);
+            return v_cat == CATEGORY_NORMAL;
+        // return v_cat == CATEGORY_NORMAL;
 
-        // Premium Req: Strictly wants Premium
+        // If I asked for Premium, I strictly want Premium
         if (veh_pref == CATEGORY_PREMIUM)
             return v_cat == CATEGORY_PREMIUM;
 
@@ -93,6 +93,12 @@ struct Node
     int latest_time;
     int service_duration = 0;
 
+    // True column/row index into the distance matrix.
+    // Set once in GraphBuilder::buildNodes() by parsing original_id.
+    // Fixes correctness when CSV input is unsorted/random order:
+    // request_id/vehicle_id are just vector positions, NOT matrix indices.
+    int matrix_idx = 0;
+
     std::string getMatrixId(
         const std::vector<Request> &reqs,
         const std::vector<Vehicle> &vehs) const
@@ -110,17 +116,11 @@ struct Node
     }
 
     // Fast integer index into the distance matrix — no string allocation or parsing.
-    // Mirrors convert():  PICKUP/E{i+1} -> i,  DUMMY_START/V{k+1} -> N+k,  everything else -> N+V
+    // Returns the pre-computed matrix_idx set by GraphBuilder, which is correct
+    // regardless of the order vehicles/employees appear in the input CSV.
     inline int getMatrixIndex() const
     {
-        if (type == PICKUP)
-            return request_id; // request_id is 0-based → column index i
-
-        if (type == DUMMY_START)
-            return N + vehicle_id; // vehicle_id is 0-based → column index N+k
-
-        // DELIVERY, DUMMY_END, SUPER_SINK, SUPER_SOURCE → OFFICE column
-        return N + V;
+        return matrix_idx;
     }
 
     std::string getOriginalRequestId(const std::vector<Request> &reqs) const

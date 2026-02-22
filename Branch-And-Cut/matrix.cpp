@@ -3,8 +3,32 @@
 #include <iostream>
 #include <cmath>
 
-// DEFINITIONS (one and only one)
+// Definitions
 std::vector<std::vector<double>> matrix;
+std::unordered_map<std::string, int> g_matrixIndex;
+int g_officeMatrixIdx = 0;
+
+void registerMatrixId(const std::string &original_id, int col_index)
+{
+    g_matrixIndex[original_id] = col_index;
+}
+
+void registerOfficeIdx(int col_index)
+{
+    g_officeMatrixIdx = col_index;
+}
+
+int matrixIdxOf(const std::string &original_id)
+{
+    auto it = g_matrixIndex.find(original_id);
+    if (it == g_matrixIndex.end())
+    {
+        std::cerr << "[FATAL] matrixIdxOf: unknown id '" << original_id
+                  << "'. Did you call registerMatrixId() for every employee and vehicle?\n";
+        std::exit(1);
+    }
+    return it->second;
+}
 
 void loadMatrix(const std::string &filename, int size)
 {
@@ -25,34 +49,20 @@ void loadMatrix(const std::string &filename, int size)
     for (int i = 0; i < size; i++)
     {
         for (int j = 0; j < size; j++)
-        {
             std::cout << matrix[i][j] << " ";
-        }
-        std::cout << std::endl;
+        std::cout << "\n";
     }
 }
 
-int convert(const std::string &a)
-{
-    if (a[0] == 'E')
-        return std::stoi(a.substr(1)) - 1;
-
-    if (a[0] == 'V')
-        return N + std::stoi(a.substr(1)) - 1;
-
-    // OFFICE / DROP
-    return N + V;
-}
-
+// String-based helpers (kept for printing / debugging)
 double getDistanceFromMatrix(const std::string &a, const std::string &b)
 {
-    return matrix[convert(a)][convert(b)];
+    return matrix[matrixIdxOf(a)][matrixIdxOf(b)];
 }
 
-int getTravelTimeFromMatrix(const std::string &a,
-                            const std::string &b,
+int getTravelTimeFromMatrix(const std::string &a, const std::string &b,
                             double speed_kmh)
 {
     double d = getDistanceFromMatrix(a, b);
-    return (d < 0.005) ? 0 : std::ceil((d / speed_kmh) * 60.0);
+    return (d < 0.005) ? 0 : (int)std::ceil((d / speed_kmh) * 60.0);
 }

@@ -1,4 +1,5 @@
 #include "GraphBuilder.h"
+#include "matrix.h"
 GraphBuilder::GraphBuilder(const std::vector<Request> &requests, const std::vector<Vehicle> &vehicles)
 {
     n_u = requests.size();
@@ -31,6 +32,14 @@ void GraphBuilder::buildNodes(const std::vector<Request> &requests, const std::v
 {
     nodes.clear();
 
+    // Use the registered map - works correctly for any ID format
+    // (E1, E123, non-consecutive, etc.)
+    auto pickupMatrixIdx = [](const std::string &id)
+    { return matrixIdxOf(id); };
+    auto vehicleMatrixIdx = [](const std::string &id)
+    { return matrixIdxOf(id); };
+    const int officeIdx = g_officeMatrixIdx;
+
     // 0. Super Source
     Node superSource;
     superSource.id = 0;
@@ -41,6 +50,7 @@ void GraphBuilder::buildNodes(const std::vector<Request> &requests, const std::v
     superSource.service_duration = 0;
     superSource.request_id = -1;
     superSource.vehicle_id = -1;
+    superSource.matrix_idx = officeIdx; // unused in routing, safe fallback
     nodes.push_back(superSource);
 
     // 1. Dummy Pickups
@@ -55,6 +65,7 @@ void GraphBuilder::buildNodes(const std::vector<Request> &requests, const std::v
         dummyPick.service_duration = 0;
         dummyPick.request_id = -1;
         dummyPick.vehicle_id = k;
+        dummyPick.matrix_idx = vehicleMatrixIdx(vehicles[k].original_id); // e.g. "V3" -> N+2
         nodes.push_back(dummyPick);
     }
 
@@ -70,6 +81,7 @@ void GraphBuilder::buildNodes(const std::vector<Request> &requests, const std::v
         pickup.service_duration = 0;
         pickup.request_id = i;
         pickup.vehicle_id = -1;
+        pickup.matrix_idx = pickupMatrixIdx(requests[i].original_id); // e.g. "E5" -> 4
         nodes.push_back(pickup);
     }
 
@@ -85,6 +97,7 @@ void GraphBuilder::buildNodes(const std::vector<Request> &requests, const std::v
         dummyDrop.service_duration = 0;
         dummyDrop.request_id = -1;
         dummyDrop.vehicle_id = k;
+        dummyDrop.matrix_idx = officeIdx; // DUMMY_END = return to office
         nodes.push_back(dummyDrop);
     }
 
@@ -100,6 +113,7 @@ void GraphBuilder::buildNodes(const std::vector<Request> &requests, const std::v
         delivery.service_duration = 0;
         delivery.request_id = i;
         delivery.vehicle_id = -1;
+        delivery.matrix_idx = officeIdx; // all deliveries are at the office
         nodes.push_back(delivery);
     }
 
@@ -113,5 +127,6 @@ void GraphBuilder::buildNodes(const std::vector<Request> &requests, const std::v
     superSink.service_duration = 0;
     superSink.request_id = -1;
     superSink.vehicle_id = -1;
+    superSink.matrix_idx = officeIdx;
     nodes.push_back(superSink);
 }
