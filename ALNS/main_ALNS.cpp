@@ -172,16 +172,25 @@ void generateOutputFiles(const std::vector<Route> &solution, const std::vector<V
     double totalOpCost = 0.0;
     double totalPenalty = 0.0;
 
+     std::vector<bool> assigned(emp.size(), false);
+       
     for (const Route &r : solution)
     {
+         for (int id : r.seq)
+            assigned[id] = true;
+
         if (r.seq.empty())
             continue;
         CostComponents cc = getRouteCostComponents(r, vehicles[r.vehicleId], emp, meta);
         totalOpCost += cc.operationalCost;
         totalPenalty += cc.penaltyCost;
     }
+    int unassigned_req=0;
+    for(int i=0;i<(int)emp.size();i++){
+        if(!assigned[i]) unassigned_req++;
+    }
 
-    vFile << std::fixed << std::setprecision(2) << totalOpCost << "," << totalPenalty << "\n";
+    vFile << std::fixed << std::setprecision(2) << totalOpCost << "," << totalPenalty << ",";vFile<<unassigned_req<<"\n";
     vFile << "vehicle_id,category,employee_id,pickup_time,drop_time\n";
     eFile << "employee_id,pickup_time,drop_time\n";
 
