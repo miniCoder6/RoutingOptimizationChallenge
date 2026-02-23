@@ -16,7 +16,7 @@
 
 Solver::Solver(const std::vector<Request> &r, const std::vector<Vehicle> &v, GraphBuilder &gb)
     : requests(r), vehicles(v), graph(gb),
-      checker(gb.nodes, r, v, gb.max_global_capacity, EvaluationMode::STRICT) {}
+      checker(gb.nodes, r, v, gb.max_global_capacity, EvaluationMode::PENALTY) {}
 
 long long Solver::getRoutePenalty(const std::vector<int> &route, int veh_idx)
 {
@@ -479,7 +479,7 @@ Solver::Solution Solver::solveDeterministicAnnealing()
         auto current_time = std::chrono::high_resolution_clock::now();
         std::chrono::duration<double> elapsed = current_time - st;
 
-        if (elapsed.count() >= 60)
+        if (elapsed.count() >= 20)
         {
             break;
         }

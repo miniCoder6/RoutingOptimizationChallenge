@@ -240,8 +240,9 @@ std::vector<Vehicle> loadVehicles(const std::string &filename)
             v.capacity = std::stoi(row[3]);
             v.cost_per_km = std::stod(row[4]);
             v.avg_speed_kmph = std::stod(row[5]);
-            if (v.avg_speed_kmph <= 0.0) {
-                continue; 
+            if (v.avg_speed_kmph <= 0.0)
+            {
+                continue;
             }
             v.current_lat = std::stod(row[6]);
             v.current_lng = std::stod(row[7]);
@@ -388,7 +389,18 @@ public:
             const Request &req = requests[node.emp_index];
             int target_id = (node.type == PICKUP) ? req.matrix_id : office_matrix_id;
             double dist = fast_distance[current_id][target_id];
-            double travel_time = (dist / veh.avg_speed_kmph) * 60.0;
+            double travel_time;
+            if (veh.avg_speed_kmph <= 0)
+            {
+                if (dist < 0.005)
+                    travel_time = 0;
+                else
+                    travel_time = 1e7;
+            }
+            else
+            {
+                travel_time = (dist / veh.avg_speed_kmph) * 60.0;
+            }
 
             total_dist += dist;
             current_time += travel_time;
@@ -433,7 +445,18 @@ public:
                     m.time_window_violation += (drop_time - (req.latest_drop + buffer));
 
                 double direct_dist = fast_distance[req.matrix_id][office_matrix_id];
-                double direct_time = (direct_dist / veh.avg_speed_kmph) * 60.0;
+                double direct_time;
+                if (veh.avg_speed_kmph <= 0)
+                {
+                    if (direct_dist < 0.005)
+                        direct_time = 0;
+                    else
+                        direct_time = 1e7;
+                }
+                else
+                {
+                    direct_time = (direct_dist / veh.avg_speed_kmph) * 60.0;
+                }
 
                 double actual_ride_time = drop_time - pickup_times[node.emp_index];
                 double delay = actual_ride_time - direct_time;
@@ -542,7 +565,18 @@ class VNSSolver
             const Request &req = requests[node.emp_index];
             int target_id = (node.type == PICKUP) ? req.matrix_id : office_matrix_id;
             double dist = fast_distance[current_id][target_id];
-            double travel_time = (dist / veh.avg_speed_kmph) * 60.0;
+            double travel_time;
+            if (veh.avg_speed_kmph <= 0)
+            {
+                if (dist < 0.005)
+                    travel_time = 0;
+                else
+                    travel_time = 1e7;
+            }
+            else
+            {
+                travel_time = (dist / veh.avg_speed_kmph) * 60.0;
+            }
 
             total_dist += dist;
             current_time += travel_time;
@@ -586,7 +620,18 @@ class VNSSolver
                     m.time_window_violation += (drop_time - (req.latest_drop + buffer));
 
                 double direct_dist = fast_distance[req.matrix_id][office_matrix_id];
-                double direct_time = (direct_dist / veh.avg_speed_kmph) * 60.0;
+                double direct_time;
+                if (veh.avg_speed_kmph <= 0)
+                {
+                    if (dist < 0.005)
+                        direct_time = 0;
+                    else
+                        direct_time = 1e7;
+                }
+                else
+                {
+                    direct_time = (dist / veh.avg_speed_kmph) * 60.0;
+                }
 
                 double actual_ride_time = drop_time - pickup_times_buf[node.emp_index];
                 double delay = actual_ride_time - direct_time;
@@ -691,11 +736,19 @@ public:
                 cur.sequence.pop_back();
                 cur.sequence.pop_back();
 
-                    if (m.objective_score < best_insertion_cost)
-                    {
-                        best_insertion_cost = m.objective_score;
-                        best_r = r;
-                    }
+                // if (m.objective_score < base_score + 50000000.0)
+                // {
+                //     if (m.objective_score < best_insertion_cost)
+                //     {
+                //         best_insertion_cost = m.objective_score;
+                //         best_r = r;
+                //     }
+                // }
+                if (m.objective_score < best_insertion_cost)
+                {
+                    best_insertion_cost = m.objective_score;
+                    best_r = r;
+                }
             }
 
             if (best_r != -1)
@@ -869,6 +922,7 @@ public:
         current_sol.calculateTotalScore(vehicles, requests, config);
         Solution best_sol = current_sol;
         int k = 1;
+        auto st = std::chrono::high_resolution_clock::now();
         for (int iter = 0; iter < max_iterations; ++iter)
         {
             iterations_done = iter + 1;
@@ -893,6 +947,14 @@ public:
             else
             {
                 k = (k % 3) + 1;
+            }
+
+            auto cur = std::chrono::high_resolution_clock::now();
+            std::chrono::duration<double> elapsed = cur - st;
+
+            if (elapsed.count() >= 20)
+            {
+                break;
             }
         }
         return best_sol;
