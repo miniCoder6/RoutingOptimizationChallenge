@@ -68,13 +68,18 @@ std::vector<Route> solveALNS(
     std::vector<OperatorStats> dStats(4);
     std::vector<OperatorStats> rStats(3);
 
-    double T = 1000.0;
+    double T_start = 1000.0;
+    double T_end = 0.1; // The temperature where we stop accepting bad moves
 
     // ------------------ Main loop ------------------
+    if (emp.empty()) return initialSol;
     int k = pow(emp.size(), 1.8);
-    int tot_it = pow(10, 8) / k;
+    int tot_it = pow(10, 8) / std::max(1, k);
     tot_it = std::min(tot_it,1000000);
-    // tot_it = std::max(,tot_it);
+
+    double cooling_rate = std::pow((T_end / T_start), (1.0 / tot_it));
+    double T = T_start;
+
     auto start = std::chrono::high_resolution_clock::now(); // add  it just after main
 
     for (int it = 1; it < tot_it; it++)
@@ -188,13 +193,8 @@ std::vector<Route> solveALNS(
         rStats[r].uses++;
 
         // ----- Cooling -----
-        double T_start = 1000.0;
-        double T_end = 0.1; // The temperature where we stop accepting bad moves
-        double T = T_start;
-
-        // Calculate the perfect cooling multiplier so T reaches T_end exactly at tot_it
-        double cooling_rate = std::pow((T_end / T_start), (1.0 / tot_it));
         T *= cooling_rate;
+        
         int update_interval = std::max(100, tot_it / 100);
         update_interval = std::min(400, update_interval);
         if (it % update_interval == 0)
