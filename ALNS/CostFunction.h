@@ -12,6 +12,13 @@ struct CostComponents {
     double totalCost;
 };
 
+struct SplitResult {
+    CostComponents cost;
+    double endTime; 
+    std::vector<int> splits; // indices in seq where a new batch starts
+};
+
+SplitResult evaluateRouteDP(const std::vector<int>& seq, const Vehicle& v, const std::vector<Employee>& emp, const Metadata& meta);
 CostComponents getRouteCostComponents(const Route&, const Vehicle&, const std::vector<Employee>&, const Metadata&);
 double routeCost(const Route&, const Vehicle&, const std::vector<Employee>&, const Metadata&);
 
