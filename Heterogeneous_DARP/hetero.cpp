@@ -13,6 +13,7 @@
 #include <fstream>
 #include <chrono>
 #include <filesystem>
+#include "globals.h"
 #include "matrix.h"
 
 namespace fs = std::filesystem;
@@ -20,10 +21,6 @@ namespace fs = std::filesystem;
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
 #endif
-
-// Defined in matrix.cpp
-extern int N;
-extern int V;
 
 // ==========================================
 // 1. DATA STRUCTURES & FAST MATRIX
@@ -294,6 +291,8 @@ std::vector<Request> loadRequests(const std::string &filename, const std::vector
             r.drop_lng = std::stod(row[5]);
             r.earliest_pickup = timeStringToMin(row[6]);
             r.latest_drop = timeStringToMin(row[7]);
+            if (r.latest_drop - r.earliest_pickup < 0)
+                r.latest_drop += 1440;
         }
         catch (...)
         {
@@ -950,6 +949,12 @@ int main(int argc, char **argv)
     int matrix_size = N + V + 1;
 
     std::cout << "Loading matrix from " << matrix_path << " (Expecting " << matrix_size << "x" << matrix_size << ")...\n";
+    for (int i = 0; i < N; ++i)
+        registerMatrixId(requests[i].original_id, i); // E1->0, E123->1, etc.
+    for (int k = 0; k < V; ++k)
+        registerMatrixId(vehicles[k].original_id, N + k); // V3->N+0, V7->N+1, etc.
+    registerOfficeIdx(N + V);                             // OFFICE is always last
+    registerMatrixId("OFFICE", N + V);                    // also reachable by string
     loadMatrix(matrix_path.string(), matrix_size);
 
     // NEW: Build the O(1) Matrix right after loading

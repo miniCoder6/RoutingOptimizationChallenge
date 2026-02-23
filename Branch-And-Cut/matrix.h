@@ -59,6 +59,12 @@ inline double getDistanceByIndex(int from, int to)
 inline int getTravelTimeByIndex(int from, int to, double speed_kmh)
 {
     double d = matrix[from][to];
+    if (speed_kmh <= 0)
+    {
+        if (d < 0.005)
+            return 0;
+        return 1e7;
+    }
     return (d < 0.005) ? 0 : (int)std::ceil((d / speed_kmh) * 60.0);
 }
 
