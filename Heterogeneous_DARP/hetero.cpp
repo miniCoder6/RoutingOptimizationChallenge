@@ -736,6 +736,7 @@ public:
                 cur.sequence.pop_back();
                 cur.sequence.pop_back();
 
+<<<<<<< HEAD
                 //if (m.objective_score < base_score + 50000000.0)
                 //{
                 //    if (m.objective_score < best_insertion_cost)
@@ -749,6 +750,21 @@ public:
                      best_insertion_cost = m.objective_score;
                      best_r = r;
                  }
+=======
+                // if (m.objective_score < base_score + 50000000.0)
+                //{
+                //     if (m.objective_score < best_insertion_cost)
+                //     {
+                //         best_insertion_cost = m.objective_score;
+                //         best_r = r;
+                //    }
+                //}
+                if (m.objective_score < best_insertion_cost)
+                {
+                    best_insertion_cost = m.objective_score;
+                    best_r = r;
+                }
+>>>>>>> 8f60c4b (final hosted)
             }
 
             if (best_r != -1)

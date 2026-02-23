@@ -174,7 +174,7 @@ json generate_matrix_file(const std::string &empData,
             blocks.push_back(block);
         }
         // ===================== THREAD FUNCTION =====================
-        std::atomic<bool> osrm_failed{false}; 
+        std::atomic<bool> osrm_failed{false};
 
         auto fetch_block = [&](const std::vector<int> &srcBlock,
                                const std::vector<int> &dstBlock)
@@ -202,7 +202,7 @@ json generate_matrix_file(const std::string &empData,
                 if (i + 1 < dstBlock.size())
                     dstStr << ";";
             }
-            
+
             std::string url =
                 "http://router.project-osrm.org/table/v1/driving/" +
                 coordStr.str() +
@@ -214,25 +214,6 @@ json generate_matrix_file(const std::string &empData,
                                          std::to_string(srcBlock.front()) + "_" +
                                          std::to_string(dstBlock.front()) + ".json");
 
-<<<<<<< HEAD
-            if (!do_haversine) {
-                std::string cmd = "curl -sS \"" + url + "\" -o \"" + tmpJson.string() + "\"";
-                if (std::system(cmd.c_str()) != 0) {
-                    osrm_failed = true;
-                    return;
-                }
-
-                std::ifstream jf(tmpJson);
-                json j;
-                if (jf.peek() != std::ifstream::traits_type::eof()) {
-                    jf >> j;
-                }
-
-                if(!j.contains("distances")) {
-                    osrm_failed = true;
-                    return;
-                }
-=======
             std::string cmd = "curl -sS \"" + url + "\" -o \"" + tmpJson.string() + "\"";
 
             bool osrm_success = false;
@@ -248,7 +229,6 @@ json generate_matrix_file(const std::string &empData,
                     {
                         std::ifstream jf(tmpJson);
                         jf >> j;
->>>>>>> 6d7d27a (final hosted)
 
                         // Verify the JSON actually contains our distance matrix
                         if (j.contains("distances"))
@@ -268,16 +248,11 @@ json generate_matrix_file(const std::string &empData,
             if (osrm_success)
             {
                 auto distances = j["distances"];
-<<<<<<< HEAD
-                for (size_t i = 0; i < srcBlock.size(); ++i) {
-                    for (size_t k = 0; k < dstBlock.size(); ++k) {
-=======
                 for (size_t i = 0; i < srcBlock.size(); ++i)
                 {
                     for (size_t k = 0; k < dstBlock.size(); ++k)
                     {
                         // Convert meters to kilometers
->>>>>>> 6d7d27a (final hosted)
                         outMatrix[srcBlock[i]][dstBlock[k]] =
                             distances[i][k].get<double>() / 1000.0;
                     }
@@ -285,18 +260,12 @@ json generate_matrix_file(const std::string &empData,
             }
             else
             {
-<<<<<<< HEAD
-                // Haversine logic
-                for (size_t i = 0; i < srcBlock.size(); ++i) {
-                    for (size_t k = 0; k < dstBlock.size(); ++k) {
-=======
                 // FALLBACK: Execute Haversine if curl failed, JSON was bad,
                 // "distances" was missing, or do_haversine is true.
                 for (size_t i = 0; i < srcBlock.size(); ++i)
                 {
                     for (size_t k = 0; k < dstBlock.size(); ++k)
                     {
->>>>>>> 6d7d27a (final hosted)
                         outMatrix[srcBlock[i]][dstBlock[k]] =
                             haversine(coords[srcBlock[i]].first, coords[srcBlock[i]].second,
                                       coords[dstBlock[k]].first, coords[dstBlock[k]].second);
@@ -309,29 +278,38 @@ json generate_matrix_file(const std::string &empData,
 
         std::vector<std::thread> threads;
 
-        for (const auto &srcBlock : blocks) {
-            for (const auto &dstBlock : blocks) {
+        for (const auto &srcBlock : blocks)
+        {
+            for (const auto &dstBlock : blocks)
+            {
                 threads.emplace_back(fetch_block, srcBlock, dstBlock);
             }
         }
 
-        for (auto &t : threads) {
-            if (t.joinable()) t.join();
+        for (auto &t : threads)
+        {
+            if (t.joinable())
+                t.join();
         }
 
-        if (osrm_failed && !do_haversine) {
-            do_haversine = 1; 
+        if (osrm_failed && !do_haversine)
+        {
+            do_haversine = 1;
             threads.clear();
 
             // Restart threads entirely in Haversine mode
-            for (const auto &srcBlock : blocks) {
-                for (const auto &dstBlock : blocks) {
+            for (const auto &srcBlock : blocks)
+            {
+                for (const auto &dstBlock : blocks)
+                {
                     threads.emplace_back(fetch_block, srcBlock, dstBlock);
                 }
             }
-            
-            for (auto &t : threads) {
-                if (t.joinable()) t.join();
+
+            for (auto &t : threads)
+            {
+                if (t.joinable())
+                    t.join();
             }
         }
 
@@ -446,8 +424,10 @@ int main()
         std::string vehData = get_part("vehicles");
         std::string metaData = get_part("metadata");
 
-        if (empData.empty() || vehData.empty() || metaData.empty()) {
-            return crow::response(400, "Missing one of the 3 CSVs (employees, vehicles, metadata).");
+        std::string modeData = get_part("optimizationLevel");
+
+        if (empData.empty() || vehData.empty() || metaData.empty() || modeData.empty()) {
+            return crow::response(400, "Missing one of the 3 CSVs (employees, vehicles, metadata, mode).");
         }
 
         // 2. Setup Temp Directory (Absolute Path)
@@ -464,6 +444,8 @@ int main()
         saveFile((reqDir / "employees.csv").string(), empData);
         saveFile((reqDir / "vehicles.csv").string(), vehData);
         saveFile((reqDir / "metadata.csv").string(), metaData);
+
+        saveFile((reqDir / "mode.txt").string(), modeData);
 
         std::ifstream read_metadata("metadata.csv");
         std::string metadata_line;

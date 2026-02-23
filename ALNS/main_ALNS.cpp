@@ -1,4 +1,5 @@
 #include "CSVReader.h"
+#include "globals.h"
 #include "ALNS.h"
 #include "CostFunction.h"
 #include <iostream>
@@ -60,10 +61,10 @@ void printRouteTrace(const Route &r, const Vehicle &v, const std::vector<Employe
 
     double t = v.startTime;
     double t1 = 0.0;
-    
+
     double cx = v.x, cy = v.y;
     double totalDist = 0.0;
-    
+
     std::vector<int> batch;
 
     auto processBatch = [&](double &currT, double &currX, double &currY)
@@ -76,9 +77,10 @@ void printRouteTrace(const Route &r, const Vehicle &v, const std::vector<Employe
         double travelT = (dOff / v.speed) * 60.0;
 
         totalDist += dOff;
-        
+
         double arrival = currT + travelT;
-        for (int id : batch) {
+        for (int id : batch)
+        {
             t1 += (arrival - pickupTime[id]);
         }
         currT = arrival;
@@ -95,13 +97,18 @@ void printRouteTrace(const Route &r, const Vehicle &v, const std::vector<Employe
 
     for (int eId : r.seq)
     {
-        const auto& e = emp[eId];
+        const auto &e = emp[eId];
 
         bool fits = true;
-        if (batch.size() + 1 > v.seatCap) fits = false;
-        else {
-            if (e.sharePref < (int)batch.size() + 1) fits = false;
-            for (int bid : batch) if (emp[bid].sharePref < (int)batch.size() + 1) fits = false;
+        if (batch.size() + 1 > v.seatCap)
+            fits = false;
+        else
+        {
+            if (e.sharePref < (int)batch.size() + 1)
+                fits = false;
+            for (int bid : batch)
+                if (emp[bid].sharePref < (int)batch.size() + 1)
+                    fits = false;
         }
 
         if (!fits)
@@ -109,23 +116,25 @@ void printRouteTrace(const Route &r, const Vehicle &v, const std::vector<Employe
             processBatch(t, cx, cy);
             double d = distKm(cx, cy, e.x, e.y);
             totalDist += d;
-            t += ((d / v.speed) * 60.0);  
+            t += ((d / v.speed) * 60.0);
         }
         else
         {
         }
-        if (!batch.empty() && fits) { 
-             double d = distKm(cx, cy, e.x, e.y);
-             totalDist += d;
-             t += (d / v.speed) * 60.0;
-
-        } else if (batch.empty()) {
-             if (fits) {
-                 double d = distKm(cx, cy, e.x, e.y);
-                 totalDist += d;
-                 t += (d / v.speed) * 60.0;
-
-             }
+        if (!batch.empty() && fits)
+        {
+            double d = distKm(cx, cy, e.x, e.y);
+            totalDist += d;
+            t += (d / v.speed) * 60.0;
+        }
+        else if (batch.empty())
+        {
+            if (fits)
+            {
+                double d = distKm(cx, cy, e.x, e.y);
+                totalDist += d;
+                t += (d / v.speed) * 60.0;
+            }
         }
 
         std::cout << emp[eId].originalId << "(pickup) -> ";
@@ -172,11 +181,11 @@ void generateOutputFiles(const std::vector<Route> &solution, const std::vector<V
     double totalOpCost = 0.0;
     double totalPenalty = 0.0;
 
-     std::vector<bool> assigned(emp.size(), false);
-       
+    std::vector<bool> assigned(emp.size(), false);
+
     for (const Route &r : solution)
     {
-         for (int id : r.seq)
+        for (int id : r.seq)
             assigned[id] = true;
 
         if (r.seq.empty())
@@ -185,12 +194,15 @@ void generateOutputFiles(const std::vector<Route> &solution, const std::vector<V
         totalOpCost += cc.operationalCost;
         totalPenalty += cc.penaltyCost;
     }
-    int unassigned_req=0;
-    for(int i=0;i<(int)emp.size();i++){
-        if(!assigned[i]) unassigned_req++;
+    int unassigned_req = 0;
+    for (int i = 0; i < (int)emp.size(); i++)
+    {
+        if (!assigned[i])
+            unassigned_req++;
     }
 
-    vFile << std::fixed << std::setprecision(2) << totalOpCost << "," << totalPenalty << ",";vFile<<unassigned_req<<"\n";
+    vFile << std::fixed << std::setprecision(2) << totalOpCost << "," << totalPenalty << ",";
+    vFile << unassigned_req << "\n";
     vFile << "vehicle_id,category,employee_id,pickup_time,drop_time\n";
     eFile << "employee_id,pickup_time,drop_time\n";
 
@@ -309,6 +321,10 @@ int main(int argc, char **argv)
 
     auto vehicles = readVehicles(argv[1] + std::string("/vehicles.csv"));
     auto employees = readEmployees(argv[1] + std::string("/employees.csv"));
+
+    std::string mode_file = argv[1] + std::string("/mode.txt");
+    std::ifstream f1(mode_file);
+    f1 >> max_time;
 
     if (vehicles.empty())
     {

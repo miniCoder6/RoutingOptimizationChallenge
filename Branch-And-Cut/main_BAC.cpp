@@ -533,6 +533,10 @@ int main(int argc, char **argv)
     fs::path vehicles_path = base_dir / "vehicles.csv";
     fs::path employees_path = base_dir / "employees.csv";
     fs::path matrix_path = base_dir / "matrix.txt";
+    fs::path mode_path = base_dir / "mode.txt";
+
+    std::ifstream f1(mode_path);
+    f1 >> max_time;
 
     // std::string temp;
     // std::cout << "METADATA FILE NAME : ";

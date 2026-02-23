@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <iostream>
 #include <chrono>
+#include "globals.h"
 
 // Helper struct for Population
 struct SolutionState
@@ -72,10 +73,11 @@ std::vector<Route> solveALNS(
     double T_end = 0.1; // The temperature where we stop accepting bad moves
 
     // ------------------ Main loop ------------------
-    if (emp.empty()) return initialSol;
+    if (emp.empty())
+        return initialSol;
     int k = pow(emp.size(), 1.8);
     int tot_it = pow(10, 8) / std::max(1, k);
-    tot_it = std::min(tot_it,1000000);
+    tot_it = std::min(tot_it, 1000000);
 
     double cooling_rate = std::pow((T_end / T_start), (1.0 / tot_it));
     double T = T_start;
@@ -92,7 +94,7 @@ std::vector<Route> solveALNS(
 
         auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(stop - start);
         //    std:: cout << "Time taken: " << duration.count() << " ms" << std::endl;
-        if (duration.count() >= 11500)
+        if (duration.count() >= max_time * 1000)
         {
             break;
         }
@@ -116,7 +118,7 @@ std::vector<Route> solveALNS(
             k1 = 0.1;
         else
             k1 = 0.05;
-        int k2 = it < (tot_it*0.99) ? 2 : 1;
+        int k2 = it < (tot_it * 0.99) ? 2 : 1;
         int q = std::max(k2, static_cast<int>(k1 * emp.size()));
         if (d == RAND_D)
             randomDestroy(next, q);
@@ -170,21 +172,26 @@ std::vector<Route> solveALNS(
 
         bool accept = false;
 
-               if (nextCost < cur.cost) {
+        if (nextCost < cur.cost)
+        {
             // Replace parent if improved, moving the trajectory forward
             pool[pIdx] = {next, nextCost};
             accept = true;
-        } else {
-             // If worse than current, use Simulated Annealing acceptance criteria
-             double diff = nextCost - cur.cost;
-             if (T > 1e-6) {
-                 double p = std::exp(-diff / T);
-                 if (p > std::uniform_real_distribution<>(0.0, 1.0)(rng)) {
-                     // Only replace the worst if accepted but worse than current
-                     pool[worstIdx] = {next, nextCost};
-                     accept = true;
-                 }
-             }
+        }
+        else
+        {
+            // If worse than current, use Simulated Annealing acceptance criteria
+            double diff = nextCost - cur.cost;
+            if (T > 1e-6)
+            {
+                double p = std::exp(-diff / T);
+                if (p > std::uniform_real_distribution<>(0.0, 1.0)(rng))
+                {
+                    // Only replace the worst if accepted but worse than current
+                    pool[worstIdx] = {next, nextCost};
+                    accept = true;
+                }
+            }
         }
 
         dStats[d].score += reward;
@@ -194,7 +201,7 @@ std::vector<Route> solveALNS(
 
         // ----- Cooling -----
         T *= cooling_rate;
-        
+
         int update_interval = std::max(100, tot_it / 100);
         update_interval = std::min(400, update_interval);
         if (it % update_interval == 0)
@@ -223,4 +230,3 @@ std::vector<Route> solveALNS(
 
     return bestGlobal.sol;
 }
-

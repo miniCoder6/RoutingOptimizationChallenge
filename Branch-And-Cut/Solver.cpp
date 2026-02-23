@@ -479,7 +479,7 @@ Solver::Solution Solver::solveDeterministicAnnealing()
         auto current_time = std::chrono::high_resolution_clock::now();
         std::chrono::duration<double> elapsed = current_time - st;
 
-        if (elapsed.count() >= 20)
+        if (elapsed.count() >= max_time)
         {
             break;
         }
