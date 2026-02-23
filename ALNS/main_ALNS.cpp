@@ -1,5 +1,4 @@
 #include "CSVReader.h"
-#include "globals.h"
 #include "ALNS.h"
 #include "CostFunction.h"
 #include <iostream>
@@ -11,149 +10,57 @@
 std::map<std::pair<double, double>, int> mappy;
 double path_len[251][251];
 
-bool checkBatchFits(const std::vector<int> &batch, int nextId, const Vehicle &v, const std::vector<Employee> &emp, double currentT, double currentX, double currentY, const Metadata &meta)
-{
 
-    if (batch.size() + 1 > v.seatCap)
-        return false;
-
-    const auto &nextE = emp[nextId];
-    int newSize = batch.size() + 1;
-    if (nextE.sharePref < newSize)
-        return false;
-    for (int pid : batch)
-        if (emp[pid].sharePref < newSize)
-            return false;
-
-    double dKm = distKm(currentX, currentY, nextE.x, nextE.y);
-    double travelMin = (dKm / v.speed) * 60.0;
-    double arrival = currentT + travelMin;
-    double startService = std::max(arrival, nextE.ready);
-    double depart = startService;
-
-    double dDestKm = distKm(nextE.x, nextE.y, nextE.destX, nextE.destY);
-    double timeToDest = (dDestKm / v.speed) * 60.0;
-    double arrivalAtDest = depart + timeToDest;
-
-    if (arrivalAtDest > nextE.due + getMaxLateness(nextE.priority, meta))
-        return false;
-
-    for (int bid : batch)
-    {
-        if (arrivalAtDest > emp[bid].due + getMaxLateness(emp[bid].priority, meta))
-            return false;
-    }
-
-    if (arrivalAtDest > v.endTime)
-        return false;
-
-    return true;
-}
 
 void printRouteTrace(const Route &r, const Vehicle &v, const std::vector<Employee> &emp, double &outDist, double &outDuration, const Metadata &meta)
 {
     outDist = 0;
     outDuration = 0;
-    if (r.seq.empty())
-        return;
+    if (r.seq.empty()) return;
 
-    std::vector<double> pickupTime(emp.size(), -1);
+    SplitResult sr = evaluateRouteDP(r.seq, v, emp, meta);
+    std::vector<int> splits = sr.splits;
+    splits.push_back(r.seq.size());
 
     double t = v.startTime;
-    double t1 = 0.0;
-
+    double t1 = 0;
     double cx = v.x, cy = v.y;
     double totalDist = 0.0;
 
-    std::vector<int> batch;
+    for (size_t i = 0; i < splits.size() - 1; i++) {
+        int start = splits[i];
+        int end = splits[i+1];
+        int batchSize = end - start;
+        std::vector<double> pickupTimes(batchSize);
 
-    auto processBatch = [&](double &currT, double &currX, double &currY)
-    {
-        if (batch.empty())
-            return;
-
-        const auto &last = emp[batch.back()];
-        double dOff = distKm(currX, currY, last.destX, last.destY);
-        double travelT = (dOff / v.speed) * 60.0;
-
-        totalDist += dOff;
-
-        double arrival = currT + travelT;
-        for (int id : batch)
-        {
-            t1 += (arrival - pickupTime[id]);
-        }
-        currT = arrival;
-
-        for (int id : batch)
-        {
-            std::cout << emp[id].originalId << "(drop) -> ";
-        }
-
-        currX = last.destX;
-        currY = last.destY;
-        batch.clear();
-    };
-
-    for (int eId : r.seq)
-    {
-        const auto &e = emp[eId];
-
-        bool fits = true;
-        if (batch.size() + 1 > v.seatCap)
-            fits = false;
-        else
-        {
-            if (e.sharePref < (int)batch.size() + 1)
-                fits = false;
-            for (int bid : batch)
-                if (emp[bid].sharePref < (int)batch.size() + 1)
-                    fits = false;
-        }
-
-        if (!fits)
-        {
-            processBatch(t, cx, cy);
-            double d = distKm(cx, cy, e.x, e.y);
-            totalDist += d;
-            t += ((d / v.speed) * 60.0);
-        }
-        else
-        {
-        }
-        if (!batch.empty() && fits)
-        {
+        for (int k = start; k < end; k++) {
+            const auto& e = emp[r.seq[k]];
             double d = distKm(cx, cy, e.x, e.y);
             totalDist += d;
             t += (d / v.speed) * 60.0;
+            double startService = std::max(t, e.ready);
+            t = startService;
+            pickupTimes[k - start] = t;
+            cx = e.x;
+            cy = e.y;
+            
+            std::cout << e.originalId << "(pickup) -> ";
         }
-        else if (batch.empty())
-        {
-            if (fits)
-            {
-                double d = distKm(cx, cy, e.x, e.y);
-                totalDist += d;
-                t += (d / v.speed) * 60.0;
-            }
+        
+        const auto& last = emp[r.seq[end - 1]];
+        double dOff = distKm(cx, cy, last.destX, last.destY);
+        totalDist += dOff;
+        t += (dOff / v.speed) * 60.0;
+        cx = last.destX;
+        cy = last.destY;
+
+        for (int k = start; k < end; k++) {
+            t1 += (t - pickupTimes[k - start]);
+            std::cout << emp[r.seq[k]].originalId << "(drop) -> ";
         }
-
-        std::cout << emp[eId].originalId << "(pickup) -> ";
-
-        double startService = std::max(t, e.ready);
-        t = startService;
-        cx = e.x;
-        cy = e.y;
-        pickupTime[eId] = t;
-        batch.push_back(eId);
     }
-
-    if (!batch.empty())
-    {
-        processBatch(t, cx, cy);
-    }
-
     std::cout << "End";
-
+    
     outDist = totalDist;
     outDuration = t1;
 }
@@ -181,11 +88,11 @@ void generateOutputFiles(const std::vector<Route> &solution, const std::vector<V
     double totalOpCost = 0.0;
     double totalPenalty = 0.0;
 
-    std::vector<bool> assigned(emp.size(), false);
-
+     std::vector<bool> assigned(emp.size(), false);
+       
     for (const Route &r : solution)
     {
-        for (int id : r.seq)
+         for (int id : r.seq)
             assigned[id] = true;
 
         if (r.seq.empty())
@@ -194,15 +101,12 @@ void generateOutputFiles(const std::vector<Route> &solution, const std::vector<V
         totalOpCost += cc.operationalCost;
         totalPenalty += cc.penaltyCost;
     }
-    int unassigned_req = 0;
-    for (int i = 0; i < (int)emp.size(); i++)
-    {
-        if (!assigned[i])
-            unassigned_req++;
+    int unassigned_req=0;
+    for(int i=0;i<(int)emp.size();i++){
+        if(!assigned[i]) unassigned_req++;
     }
 
-    vFile << std::fixed << std::setprecision(2) << totalOpCost << "," << totalPenalty << ",";
-    vFile << unassigned_req << "\n";
+    vFile << std::fixed << std::setprecision(2) << totalOpCost << "," << totalPenalty << ",";vFile<<unassigned_req<<"\n";
     vFile << "vehicle_id,category,employee_id,pickup_time,drop_time\n";
     eFile << "employee_id,pickup_time,drop_time\n";
 
@@ -214,92 +118,43 @@ void generateOutputFiles(const std::vector<Route> &solution, const std::vector<V
         const Vehicle &v = vehicles[r.vehicleId];
         std::string cat = v.premium ? "premium" : "normal";
 
+        SplitResult sr = evaluateRouteDP(r.seq, v, emp, meta);
+        std::vector<int> splits = sr.splits;
+        splits.push_back(r.seq.size());
+
         double t = v.startTime;
         double cx = v.x, cy = v.y;
 
-        // Structure to hold pending drops: {empId, pickupTime}
-        std::vector<std::pair<int, std::string>> batch;
+        for (size_t i = 0; i < splits.size() - 1; i++) {
+            int start = splits[i];
+            int end = splits[i+1];
+            int batchSize = end - start;
+            std::vector<std::string> pickTimes(batchSize);
 
-        auto processBatch = [&](double &currT, double &currX, double &currY)
-        {
-            if (batch.empty())
-                return;
-
-            // Drive to Office
-            const auto &last = emp[batch.back().first];
-            double dOff = distKm(currX, currY, last.destX, last.destY);
-            double tOff = (dOff / v.speed) * 60.0;
-
-            double arrival = currT + tOff;
-            std::string dropTimeStr = formatTime(arrival);
-
-            currT = arrival;
-
-            for (auto &item : batch)
-            {
-                int eId = item.first;
-                std::string pickTimeStr = item.second;
-                std::string origId = emp[eId].originalId;
-
-                vFile << v.originalId << "," << cat << "," << origId << "," << pickTimeStr << "," << dropTimeStr << "\n";
-
-                eFile << origId << "," << pickTimeStr << "," << dropTimeStr << "\n";
-            }
-
-            currX = last.destX;
-            currY = last.destY;
-            batch.clear();
-        };
-
-        for (int eId : r.seq)
-        {
-
-            bool fits = true;
-            if (batch.size() + 1 > v.seatCap)
-                fits = false;
-            else
-            {
-                if (emp[eId].sharePref < (int)batch.size() + 1)
-                    fits = false;
-                for (auto &item : batch)
-                {
-                    if (emp[item.first].sharePref < (int)batch.size() + 1)
-                        fits = false;
-                }
-            }
-
-            std::vector<int> currentBatchIds;
-            for (auto &p : batch)
-                currentBatchIds.push_back(p.first);
-
-            if (!checkBatchFits(currentBatchIds, eId, v, emp, t, cx, cy, meta))
-            {
-
-                processBatch(t, cx, cy);
-
-                double d = distKm(cx, cy, emp[eId].x, emp[eId].y);
+            for (int k = start; k < end; k++) {
+                const auto& e = emp[r.seq[k]];
+                double d = distKm(cx, cy, e.x, e.y);
                 t += (d / v.speed) * 60.0;
+                double startService = std::max(t, e.ready);
+                t = startService;
+                pickTimes[k - start] = formatTime(t);
+                cx = e.x;
+                cy = e.y;
             }
-            else
-            {
 
-                double d = distKm(cx, cy, emp[eId].x, emp[eId].y);
-                t += (d / v.speed) * 60.0;
+            const auto& last = emp[r.seq[end - 1]];
+            double dOff = distKm(cx, cy, last.destX, last.destY);
+            t += (dOff / v.speed) * 60.0;
+            cx = last.destX;
+            cy = last.destY;
+            
+            std::string dropTimeStr = formatTime(t);
+
+            for (int k = start; k < end; k++) {
+                const auto& e = emp[r.seq[k]];
+                vFile << v.originalId << "," << cat << "," << e.originalId << "," << pickTimes[k - start] << "," << dropTimeStr << "\n";
+                eFile << e.originalId << "," << pickTimes[k - start] << "," << dropTimeStr << "\n";
             }
-
-            double startService = std::max(t, emp[eId].ready);
-            std::string pickTimeStr = formatTime(startService);
-
-            t = startService;
-            cx = emp[eId].x;
-            cy = emp[eId].y;
-
-            batch.push_back({eId, pickTimeStr});
-        }
-
-        if (!batch.empty())
-        {
-            processBatch(t, cx, cy);
         }
     }
 
@@ -321,10 +176,6 @@ int main(int argc, char **argv)
 
     auto vehicles = readVehicles(argv[1] + std::string("/vehicles.csv"));
     auto employees = readEmployees(argv[1] + std::string("/employees.csv"));
-
-    std::string mode_file = argv[1] + std::string("/mode.txt");
-    std::ifstream f1(mode_file);
-    f1 >> max_time;
 
     if (vehicles.empty())
     {
@@ -348,6 +199,11 @@ int main(int argc, char **argv)
         meta.objectiveTimeWeight = 1.0;
     }
     readDist(argv[1] + std::string("/matrix.txt"), (int)(employees.size() + vehicles.size()) + 1);
+
+      std::string mode_file = argv[1] + std::string("/mode.txt");
+    std::ifstream f1(mode_file);
+    f1 >> max_time;
+
     int idx = 0;
     for (int i = 0; i < employees.size(); i++)
     {
