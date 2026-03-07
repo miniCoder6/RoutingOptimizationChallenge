@@ -42,7 +42,7 @@ int getPriorityDelay(int priority)
     return PRIORITY_DELAY[0];
 }
 
-double INFEASIBILITY_PENALTY = 100000.0;
+double INFEASIBILITY_PENALTY = 0.0;
 double PENALTY_PREMIUM_VEHICLE = 500000.0;
 double PENALTY_SHARING_PREFERENCE = 500000.0;
 // =================== ENUMS & HELPERS ===================
@@ -53,16 +53,11 @@ enum VehicleCat
     PREMIUM = 1
 };
 
-int timeToMinutes(const string &s)
+int timeToMinutes(const string &t)
 {
-    if (s.empty())
-        return 0;
-    size_t p = s.find(':');
-    if (p == string::npos)
-        return stoi(s);
-    int h = stoi(s.substr(0, p));
-    int m = stoi(s.substr(p + 1));
-    return (h * 60) + m;
+    int hh = stoi(t.substr(0, 2));
+    int mm = stoi(t.substr(3, 2));
+    return hh * 60 + mm;
 }
 
 string minToTime(int m)
@@ -1098,6 +1093,12 @@ int main(int argc, char *argv[])
         cerr << "Error: Failed to load vehicle or employee data!\n";
         return 1;
     }
+    double max_cost = 0.0;
+    for (const auto &d : drivers)
+    {
+        max_cost = max(max_cost, d.cost_per_km);
+    }
+    INFEASIBILITY_PENALTY = max_cost * 1000.0;
 
     MAT_N = (int)persons.size();
     MAT_V = (int)drivers.size();
@@ -1145,6 +1146,14 @@ int main(int argc, char *argv[])
              << fixed << setprecision(4) << c.fitness
              << " | Vehicles: " << c.numVehiclesUsed << "\n";
     }
+    mt19937 init_rng(chrono::steady_clock::now().time_since_epoch().count());
+    for (int i = 0; i < 15; i++)
+    {
+        Chromosome c_rand(persons.size());
+        shuffle(c_rand.giantTour.begin(), c_rand.giantTour.end(), init_rng);
+        splitProcedure(c_rand, persons, drivers);
+        population.push_back(c_rand);
+    }
 
     if (population.empty())
     {
@@ -1175,7 +1184,6 @@ int main(int argc, char *argv[])
     mt19937 rng(chrono::steady_clock::now().time_since_epoch().count());
 
     auto start_time = chrono::high_resolution_clock::now();
-    auto st = chrono::high_resolution_clock::now();
 
     for (int gen = 0; gen < GENERATIONS; gen++)
     {
@@ -1214,14 +1222,6 @@ int main(int argc, char *argv[])
             nextPop.push_back(child);
         }
         population = nextPop;
-
-        auto current_time = std::chrono::high_resolution_clock::now();
-        std::chrono::duration<double> elapsed = current_time - st;
-
-        if (elapsed.count() >= 2)
-        {
-            break;
-        }
     }
 
     // One final check after last generation

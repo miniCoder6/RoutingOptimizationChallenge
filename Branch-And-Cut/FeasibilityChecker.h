@@ -44,10 +44,9 @@ public:
     long long total_penalty;
 
     // Penalty Multipliers (Tweak these to tell the solver which rules are most important)
-    long long penalty_time_window = 100000;         // Per minute late
-    long long penalty_capacity = 10000000;          // Per passenger over capacity
-    long long penalty_premium_vehicle = 5000000;    // Flat penalty for wrong vehicle type
-    long long penalty_sharing_preference = 5000000; // Flat penalty for violating max_shared_with
+    long long penalty_time_window = tot_speed_per_km * 1000; // Per minute late
+    long long penalty_premium_vehicle = 5000000;             // Flat penalty for wrong vehicle type
+    long long penalty_sharing_preference = 5000000;          // Flat penalty for violating max_shared_with
 };
 
 #endif // FEASIBILITYCHECKER_H

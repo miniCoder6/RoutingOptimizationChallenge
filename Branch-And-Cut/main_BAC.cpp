@@ -336,6 +336,7 @@ std::vector<Vehicle> loadVehicles(const std::string &filename)
 
     int sequential_id = 1; // Solver expects 1-based indexing for vehicles
     int nn = 0;
+    tot_speed_per_km = 0;
 
     while (std::getline(file, line))
     {
@@ -398,10 +399,10 @@ std::vector<Vehicle> loadVehicles(const std::string &filename)
         v.avg_speed_kmh = std::stod(row[5]);
 
         vehicles.push_back(v);
-        tot_speed_per_km += v.cost_per_km;
+        tot_speed_per_km = std::max(v.cost_per_km, tot_speed_per_km);
         nn++;
     }
-    avg_speed_per_km = tot_speed_per_km / nn;
+    avg_speed_per_km = tot_speed_per_km;
     std::cout << "Loaded " << vehicles.size() << " vehicles from " << filename << "\n";
     return vehicles;
 }

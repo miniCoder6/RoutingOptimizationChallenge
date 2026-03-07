@@ -1003,6 +1003,22 @@ int main(int argc, char **argv)
 
     std::cout << "Loading data...\n";
     std::vector<Vehicle> vehicles = loadVehicles(vehicles_path.string());
+    // --- NEW: Calculate max cost_per_km and update alpha/beta ---
+    if (!vehicles.empty())
+    {
+        double max_cost_per_km = 0.0;
+        for (const auto &v : vehicles)
+        {
+            if (v.cost_per_km > max_cost_per_km)
+            {
+                max_cost_per_km = v.cost_per_km;
+            }
+        }
+
+        // Apply the dynamic penalties
+        config.alpha = 500.0 * max_cost_per_km;
+        config.beta = 1000.0 * max_cost_per_km;
+    }
     std::vector<Request> requests = loadRequests(employees_path.string(), config.max_delays);
 
     if (requests.empty() || vehicles.empty())
