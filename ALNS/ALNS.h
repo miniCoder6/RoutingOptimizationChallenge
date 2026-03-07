@@ -4,8 +4,7 @@
 #include "Route.h"
 #include <vector>
 #include "CSVReader.h" 
-
-inline double max_time;
+#include "globals.h"
 
 std::vector<Route> solveALNS(
     const std::vector<Employee>&,
