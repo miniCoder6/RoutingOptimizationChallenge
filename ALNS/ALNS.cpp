@@ -12,7 +12,6 @@
 #include <iostream>
 #include <chrono>
 
-// Helper struct for Population
 struct SolutionState
 {
     std::vector<Route> sol;
@@ -26,7 +25,6 @@ std::vector<Route> solveALNS(
 {
     std::mt19937 rng(7);
 
-    // ------------------ Initial solution ------------------
     std::vector<Route> initialSol;
     for (const auto &v : veh)
         initialSol.push_back({v.id, {}});
@@ -37,19 +35,15 @@ std::vector<Route> solveALNS(
     for (const auto &r : initialSol)
         initialCost += routeCost(r, veh[r.vehicleId], emp, meta);
 
-    // ------------------ Initialize Pool ------------------
     const int POOL_SIZE = 5;
     std::vector<SolutionState> pool;
 
-    // Fill pool with clones of initial solution
     for (int i = 0; i < POOL_SIZE; ++i)
     {
         pool.push_back({initialSol, initialCost});
     }
 
     SolutionState bestGlobal = pool[0];
-
-    // ------------------ ALNS parameters ------------------
 
     enum DestroyOp
     {
@@ -69,21 +63,25 @@ std::vector<Route> solveALNS(
     std::vector<OperatorStats> rStats(3);
 
     double T_start = 1000.0;
-    double T_end = 0.1; // The temperature where we stop accepting bad moves
+    double T_end = 0.1;
 
-    // ------------------ Main loop ------------------
-    if (emp.empty()) return initialSol;
+    if (emp.empty())
+        return initialSol;
     int k = pow(emp.size(), 1.8);
     int tot_it = pow(10, 8) / std::max(1, k);
-    tot_it = std::min(tot_it,1000000);
+    tot_it = std::min(tot_it, 1000000);
 
-    if(max_time>10 && max_time<=30) { tot_it*=2; }
-    else tot_it*=6;
+    if (max_time > 10 && max_time <= 30)
+    {
+        tot_it *= 2;
+    }
+    else
+        tot_it *= 6;
 
     double cooling_rate = std::pow((T_end / T_start), (1.0 / tot_it));
     double T = T_start;
 
-    auto start = std::chrono::high_resolution_clock::now(); // add  it just after main
+    auto start = std::chrono::high_resolution_clock::now();
 
     for (int it = 1; it < tot_it; it++)
     {
@@ -94,7 +92,6 @@ std::vector<Route> solveALNS(
         auto stop = std::chrono::high_resolution_clock::now();
 
         auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(stop - start);
-        //    std:: cout << "Time taken: " << duration.count() << " ms" << std::endl;
         if (duration.count() >= 11500)
         {
             break;
@@ -119,7 +116,7 @@ std::vector<Route> solveALNS(
             k1 = 0.1;
         else
             k1 = 0.05;
-        int k2 = it < (tot_it*0.99) ? 2 : 1;
+        int k2 = it < (tot_it * 0.99) ? 2 : 1;
         int q = std::max(k2, static_cast<int>(k1 * emp.size()));
         if (d == RAND_D)
             randomDestroy(next, q);
@@ -141,7 +138,6 @@ std::vector<Route> solveALNS(
         for (const auto &rt : next)
             nextCost += routeCost(rt, veh[rt.vehicleId], emp, meta);
 
-        // ----- Reward computation -----
         double reward = 0.0;
 
         if (nextCost < bestGlobal.cost)
@@ -158,8 +154,6 @@ std::vector<Route> solveALNS(
             reward = 0.5;
         }
 
-        // ----- Pool Update Logic -----
-
         int worstIdx = -1;
         double worstCost = -1.0;
         for (int i = 0; i < POOL_SIZE; ++i)
@@ -173,21 +167,23 @@ std::vector<Route> solveALNS(
 
         bool accept = false;
 
-               if (nextCost < cur.cost) {
-            // Replace parent if improved, moving the trajectory forward
+        if (nextCost < cur.cost)
+        {
             pool[pIdx] = {next, nextCost};
             accept = true;
-        } else {
-             // If worse than current, use Simulated Annealing acceptance criteria
-             double diff = nextCost - cur.cost;
-             if (T > 1e-6) {
-                 double p = std::exp(-diff / T);
-                 if (p > std::uniform_real_distribution<>(0.0, 1.0)(rng)) {
-                     // Only replace the worst if accepted but worse than current
-                     pool[worstIdx] = {next, nextCost};
-                     accept = true;
-                 }
-             }
+        }
+        else
+        {
+            double diff = nextCost - cur.cost;
+            if (T > 1e-6)
+            {
+                double p = std::exp(-diff / T);
+                if (p > std::uniform_real_distribution<>(0.0, 1.0)(rng))
+                {
+                    pool[worstIdx] = {next, nextCost};
+                    accept = true;
+                }
+            }
         }
 
         dStats[d].score += reward;
@@ -195,9 +191,8 @@ std::vector<Route> solveALNS(
         dStats[d].uses++;
         rStats[r].uses++;
 
-        // ----- Cooling -----
         T *= cooling_rate;
-        
+
         int update_interval = std::max(100, tot_it / 100);
         update_interval = std::min(400, update_interval);
         if (it % update_interval == 0)

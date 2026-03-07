@@ -23,11 +23,4 @@ Request createRequest(
     std::string v_pref, std::string s_pref,
     const std::map<int, int> &priority_delays);
 
-// struct InitialTrip
-// {
-//     std::string vehicle_id;
-//     std::string employee_id;
-// };
-// std::vector<InitialTrip> loadInitialSolutionCSV(const std::string &filename);
-
 #endif

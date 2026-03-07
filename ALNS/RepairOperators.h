@@ -6,18 +6,18 @@
 
 #include "CSVReader.h"
 
-void greedyRepair(std::vector<Route>&,
-                  const std::vector<Employee>&,
-                  const std::vector<Vehicle>&,
-                  const Metadata&);
+void greedyRepair(std::vector<Route> &,
+                  const std::vector<Employee> &,
+                  const std::vector<Vehicle> &,
+                  const Metadata &);
 
-void randomRepair(std::vector<Route>&,
-                  const std::vector<Employee>&,
-                  const std::vector<Vehicle>&,
-                  const Metadata&);
+void randomRepair(std::vector<Route> &,
+                  const std::vector<Employee> &,
+                  const std::vector<Vehicle> &,
+                  const Metadata &);
 
-void regretRepair(std::vector<Route>&,
-                  const std::vector<Employee>&,
-                  const std::vector<Vehicle>&,
-                  const Metadata&,
+void regretRepair(std::vector<Route> &,
+                  const std::vector<Employee> &,
+                  const std::vector<Vehicle> &,
+                  const Metadata &,
                   int k = 2);

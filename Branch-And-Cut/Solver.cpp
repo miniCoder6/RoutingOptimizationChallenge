@@ -12,7 +12,6 @@
 #include <unordered_map>
 #include <functional>
 #include <queue>
-// std::mt19937_64 RNG(std::chrono::steady_clock::now().time_since_epoch().count());
 
 Solver::Solver(const std::vector<Request> &r, const std::vector<Vehicle> &v, GraphBuilder &gb)
     : requests(r), vehicles(v), graph(gb),
@@ -27,7 +26,6 @@ long long Solver::getRoutePenalty(const std::vector<int> &route, int veh_idx)
     return 1e15;
 }
 
-// --- COST CALCULATION ---
 double Solver::calculateRouteCost(const std::vector<int> &route_ids, const Vehicle &v)
 {
     if (route_ids.empty())
@@ -35,7 +33,6 @@ double Solver::calculateRouteCost(const std::vector<int> &route_ids, const Vehic
 
     double current_time = std::max((double)v.available_from, (double)graph.nodes[route_ids[0]].earliest_time);
 
-    // --- FIX: Delay departure to arrive exactly at the first pickup time ---
     if (route_ids.size() > 1)
     {
         const Node &n_start = graph.nodes[route_ids[0]];
@@ -47,16 +44,12 @@ double Solver::calculateRouteCost(const std::vector<int> &route_ids, const Vehic
             double speed = (v.avg_speed_kmh > 0) ? v.avg_speed_kmh : 30.0;
             double travel_time_to_first = (dist / speed) * 60.0;
 
-            // If leaving right now gets us there before the earliest pickup, delay the start
             if (current_time + travel_time_to_first < n_first.earliest_time)
             {
                 current_time = n_first.earliest_time - travel_time_to_first;
             }
         }
     }
-    // -----------------------------------------------------------------------
-
-    // double start_time = current_time;
     double total_passenger_travel_time = 0.0;
     std::map<int, double> passenger_boarding_times;
     double total_dist = 0;
@@ -68,7 +61,6 @@ double Solver::calculateRouteCost(const std::vector<int> &route_ids, const Vehic
         const Node &n_u = graph.nodes[u];
         const Node &n_next = graph.nodes[next];
 
-        // Service time
         double arrival = std::max((double)n_u.earliest_time, current_time);
         double departure = std::max((double)n_u.earliest_time, current_time) + n_u.service_duration;
 
@@ -97,9 +89,7 @@ double Solver::calculateRouteCost(const std::vector<int> &route_ids, const Vehic
         current_time = departure + time;
     }
 
-    // double duration = current_time - start_time;
     double monetary_cost = total_dist * v.cost_per_km;
-    // Note: ensure weighted_dist_cost and weight_time_cost are defined in Solver.h or locally
     return (dist_cost * monetary_cost) + (time_cost * total_passenger_travel_time);
 }
 
@@ -116,15 +106,12 @@ double Solver::calculateTotalCost(const Solution &sol)
 
         // 2. Penalty Cost
         long long penalty = 0;
-        // Check feasibility (EvaluationMode::PENALTY should be set in constructor)
         if (checker.runEightStepEvaluation(route, v_idx))
         {
             penalty = checker.getPenalty();
         }
         else
         {
-            // Hard constraint violation (Capacity/Compatibility)
-            // Apply massive penalty to discourage this state
             penalty = 1e9;
         }
 
@@ -133,21 +120,16 @@ double Solver::calculateTotalCost(const Solution &sol)
     return total_objective;
 }
 
-//--- INITIAL SOLUTION (Greedy Insertion) ---
 void Solver::buildInitialSolution(Solution &sol)
 {
-    // Init empty routes
     for (const auto &veh : vehicles)
     {
         sol.routes[veh.id] = {1 + (veh.id - 1), graph.n + 1 + (veh.id - 1)};
     }
 
-    // Sort requests by Earliest Pickup Time (simple heuristic)
     std::vector<int> sorted_reqs(requests.size());
     for (int i = 0; i < (int)requests.size(); ++i)
         sorted_reqs[i] = i;
-    // std::sort(sorted_reqs.begin(), sorted_reqs.end(), [&](int a, int b)
-    //           { return requests[a].earliest_pickup < requests[b].earliest_pickup; });
 
     static std::mt19937 g(std::time(nullptr));
     std::shuffle(sorted_reqs.begin(), sorted_reqs.end(), g);
@@ -162,8 +144,6 @@ void Solver::buildInitialSolution(Solution &sol)
     sol.total_cost = calculateTotalCost(sol);
 }
 
-// --- HELPER: BEST INSERTION ---
-// Finds the best vehicle and position for a request.
 bool Solver::insertRequestBest(Solution &sol, int req_idx, int forbidden_veh_id)
 {
     int best_veh_id = -1;
@@ -174,27 +154,22 @@ bool Solver::insertRequestBest(Solution &sol, int req_idx, int forbidden_veh_id)
     int p_node = graph.getPickupNodeId(req_idx);
     int d_node = graph.getDeliveryNodeId(req_idx);
 
-    // Iterate all vehicles
     for (auto &[veh_id, route] : sol.routes)
     {
         if (veh_id == forbidden_veh_id)
-            continue; // Skip forbidden vehicle (for Elimination op)
+            continue;
 
         int veh_idx = veh_id - 1;
-        // if (!requests[req_idx].isVehicleCompatible(vehicles[veh_idx].category))
-        //     continue;
 
         double current_route_cost = calculateRouteCost(route, vehicles[veh_idx]);
         long long old_penalty = getRoutePenalty(route, veh_idx);
 
-        // Check all positions i (pickup) and j (delivery)
         for (int i = 1; i < (int)route.size(); ++i)
         {
             for (int j = i; j < (int)route.size(); ++j)
             {
                 if (checker.checkInsert(route, veh_idx, p_node, d_node, i, j))
                 {
-                    // Simulate insertion
                     std::vector<int> temp_route = route;
                     temp_route.insert(temp_route.begin() + j, d_node);
                     temp_route.insert(temp_route.begin() + i, p_node);
@@ -218,7 +193,6 @@ bool Solver::insertRequestBest(Solution &sol, int req_idx, int forbidden_veh_id)
         }
     }
 
-    // Perform insertion if a valid spot was found
     if (best_veh_id != -1)
     {
         auto &route = sol.routes[best_veh_id];
@@ -230,21 +204,17 @@ bool Solver::insertRequestBest(Solution &sol, int req_idx, int forbidden_veh_id)
     return false;
 }
 
-// Wrapper for when no vehicle is forbidden (standard insertion)
 bool Solver::insertRequestBest(Solution &sol, int req_idx)
 {
     return insertRequestBest(sol, req_idx, -1);
 }
 
-// --- DETERMINISTIC ANNEALING MAIN LOOP ---
 Solver::Solution Solver::solveDeterministicAnnealing()
 {
     auto begin = std::chrono::high_resolution_clock::now();
 
     Solution current_sol;
     buildInitialSolution(current_sol);
-    // buildGraphMatchingInitialSolution(current_sol);
-    // buildRegretSolution(current_sol);
 
     auto end = std::chrono::high_resolution_clock::now();
     auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(end - begin);
@@ -258,14 +228,12 @@ Solver::Solution Solver::solveDeterministicAnnealing()
 
     double initial_t = avg_cost * 0.5;
     double TT = initial_t;
-    // double TT = 100.0;
     double FT = 0.05;
 
     int iter_per_temp = 10;
     double total_cooling_steps = (double)max_iterations / iter_per_temp;
 
     double alpha = std::pow(FT / initial_t, 1.0 / total_cooling_steps);
-    // double alpha = 1;
     int reheat_interval = 2000;
 
     int no_improve_global = 0;
@@ -351,22 +319,6 @@ Solver::Solution Solver::solveDeterministicAnnealing()
             }
         }
 
-        // if (!accepted)
-        //     no_improve_global++;
-        // if (iter % iter_per_temp == 0)
-        // {
-        //     TT *= alpha;
-        //     if (TT < FT)
-        //         TT = FT;
-        // }
-        // if (no_improve_global > reheat_interval)
-        // {
-        //     current_sol = best_sol;
-        //     TT = initial_t * 0.15;
-        //     // TT = initial_t;
-        //     no_improve_global = 0;
-        // }
-
         auto current_time = std::chrono::high_resolution_clock::now();
         std::chrono::duration<double> elapsed = current_time - st;
 
@@ -443,8 +395,6 @@ bool Solver::operatorRelocate(Solution &sol, double threshold)
             continue;
         int tgt_idx = tgt_veh_id - 1;
         const Vehicle &v = vehicles[tgt_veh_id - 1];
-        // if (!requests[req_idx].isVehicleCompatible(v.category))
-        //     continue;
 
         double cost_old_tgt = calculateRouteCost(tgt_route, v);
         long long pen_old_tgt = getRoutePenalty(tgt_route, tgt_idx);
@@ -517,11 +467,6 @@ bool Solver::operatorExchange(Solution &sol, double threshold)
     int v1_idx = v1 - 1;
     int v2_idx = v2 - 1;
 
-    // if (!requests[r1_idx].isVehicleCompatible(vehicles[v2 - 1].category))
-    //     return false;
-    // if (!requests[r2_idx].isVehicleCompatible(vehicles[v1 - 1].category))
-    //     return false;
-
     double cost_v1_old = calculateRouteCost(sol.routes[v1], vehicles[v1_idx]);
     long long pen_v1_old = getRoutePenalty(sol.routes[v1], v1_idx);
 
@@ -550,7 +495,6 @@ bool Solver::operatorExchange(Solution &sol, double threshold)
     int p2 = graph.getPickupNodeId(r2_idx), d2 = graph.getDeliveryNodeId(r2_idx);
     int p1 = graph.getPickupNodeId(r1_idx), d1 = graph.getDeliveryNodeId(r1_idx);
 
-    // Find best insertion for r2 into v1
     double best_v1_new_cost = std::numeric_limits<double>::max();
     std::vector<int> best_v1_route;
     for (int i = 1; i < (int)temp_v1.size(); ++i)
@@ -577,7 +521,6 @@ bool Solver::operatorExchange(Solution &sol, double threshold)
     if (best_v1_route.empty())
         return false;
 
-    // Find best insertion for r1 into v2
     double best_v2_new_cost = std::numeric_limits<double>::max();
     std::vector<int> best_v2_route;
     for (int i = 1; i < (int)temp_v2.size(); ++i)
@@ -615,7 +558,6 @@ bool Solver::operatorExchange(Solution &sol, double threshold)
     return false;
 }
 
-// --- OPERATOR 3: ELIMINATE (Reduce Vehicles) ---
 bool Solver::operatorEliminate(Solution &sol)
 {
     std::vector<int> candidate_vehicles;
@@ -645,7 +587,6 @@ bool Solver::operatorEliminate(Solution &sol)
     bool success = true;
     for (int req_idx : orphaned_requests)
     {
-        // Try to insert into ANY vehicle EXCEPT the victim
         if (!insertRequestBest(sol, req_idx, victim_veh_id))
         {
             success = false;
@@ -665,7 +606,6 @@ bool Solver::operatorEliminate(Solution &sol)
     }
 }
 
-// --- OPERATOR 4: 2-OPT (Intra/Inter-Route Optimization) ---
 bool Solver::operator2Opt(Solution &sol, double threshold)
 {
     std::vector<int> active_vehs;
@@ -726,25 +666,6 @@ bool Solver::operator2Opt(Solution &sol, double threshold)
 
     long long pen1_new, pen2_new;
 
-    // auto compatibleRoute = [&](const std::vector<int> &r, int veh_idx)
-    // {
-    //     for (int node : r)
-    //     {
-    //         if (graph.nodes[node].type == Node::PICKUP)
-    //         {
-    //             int req = graph.nodes[node].request_id;
-    //             if (!requests[req].isVehicleCompatible(vehicles[veh_idx].category))
-    //                 return false;
-    //         }
-    //     }
-    //     return true;
-    // };
-
-    // if (!compatibleRoute(new_r1, v1_id - 1))
-    //     return false;
-    // if (!compatibleRoute(new_r2, v2_id - 1))
-    //     return false;
-
     if (!checker.runEightStepEvaluation(new_r1, idx1_v))
         return false;
     pen1_new = checker.getPenalty();
@@ -770,28 +691,22 @@ bool Solver::operator2Opt(Solution &sol, double threshold)
 
 bool Solver::operatorInsertUnserved(Solution &sol)
 {
-    // 1. Sanity Check: If everyone is served, do nothing.
     if (sol.unserved_requests.empty())
         return false;
 
-    // 2. Pick a random unserved request
     int idx_in_list = rand() % sol.unserved_requests.size();
     int req_idx = sol.unserved_requests[idx_in_list];
 
-    // 3. Attempt to insert it
     if (insertRequestBest(sol, req_idx, -1))
     {
-        // 4. Success! Remove the request from the unserved list.
         sol.unserved_requests[idx_in_list] = sol.unserved_requests.back();
         sol.unserved_requests.pop_back();
 
-        // 5. Update global cost
         sol.total_cost = calculateTotalCost(sol);
 
         return true;
     }
 
-    // 6. Failure: No feasible spot found in the current configuration
     return false;
 }
 
@@ -802,81 +717,8 @@ double Solver::calculateAverageEdgeCost()
     for (int i = 0; i < 100; ++i)
     {
         int r1 = rand() % requests.size();
-        // int r2 = rand() % requests.size();
-
-        // sum += getDistance(requests[r1].pickup_loc, requests[r2].drop_loc);
-        // request_id i → matrix index i; OFFICE → N+V  (same mapping as getMatrixIndex())
         sum += getDistanceByIndex(r1, N + V);
         count++;
     }
     return (count > 0) ? sum / count : 10.0;
 }
-// void Solver::buildInitialSolutionFromCSV(
-//     Solution &sol,
-//     const std::vector<InitialTrip> &trips)
-// {
-//     sol.routes.clear();
-//     sol.unserved_requests.clear();
-
-//     // 1. Initialize empty routes
-//     for (const auto &veh : vehicles)
-//     {
-//         sol.routes[veh.id] = {
-//             1 + (veh.id - 1),
-//             graph.n + 1 + (veh.id - 1)};
-//     }
-
-//     // 2. Build lookup maps
-//     std::unordered_map<std::string, int> vehMap;
-//     for (const auto &v : vehicles)
-//         vehMap[v.original_id] = v.id;
-
-//     std::unordered_map<std::string, int> reqMap;
-//     for (int i = 0; i < (int)requests.size(); i++)
-//         reqMap[requests[i].original_id] = i;
-
-//     // 3. Insert trips in given order
-//     for (const auto &t : trips)
-//     {
-//         if (!vehMap.count(t.vehicle_id) || !reqMap.count(t.employee_id))
-//             continue;
-
-//         int veh_id = vehMap[t.vehicle_id];
-//         int req_id = reqMap[t.employee_id];
-
-//         int p = graph.getPickupNodeId(req_id);
-//         int d = graph.getDeliveryNodeId(req_id);
-
-//         auto &route = sol.routes[veh_id];
-
-//         // Insert before END
-//         route.insert(route.end() - 1, p);
-//         route.insert(route.end() - 1, d);
-//     }
-
-//     // 4. Mark unserved requests
-//     std::vector<bool> served(requests.size(), false);
-//     for (auto &[vid, route] : sol.routes)
-//         for (int n : route)
-//             if (graph.nodes[n].type == Node::PICKUP)
-//                 served[graph.nodes[n].request_id] = true;
-
-//     for (int i = 0; i < (int)requests.size(); i++)
-//         if (!served[i])
-//             sol.unserved_requests.push_back(i);
-
-//     // 5. Validate feasibility
-//     for (auto &[vid, route] : sol.routes)
-//     {
-//         if (!checker.runEightStepEvaluation(route, vid - 1))
-//         {
-//             std::cerr << "Initial solution infeasible for vehicle " << vid << "\n";
-//         }
-//     }
-
-//     // 6. Cost
-//     sol.total_cost = calculateTotalCost(sol);
-// }
-
-// --- GRAPH MATCHING + CAPACITY AWARE INITIAL SOLUTION ---
-// --- GRAPH MATCHING + CAPACITY + SHARING AWARE INITIAL SOLUTION ---
