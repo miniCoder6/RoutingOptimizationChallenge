@@ -12,8 +12,12 @@
 
 int timeStringToMin(std::string timeStr)
 {
-    int h = std::stoi(timeStr.substr(0, 2));
-    int m = std::stoi(timeStr.substr(3, 2));
+    size_t colonPos = timeStr.find(':');
+    if (colonPos == std::string::npos)
+        return 0;
+
+    int h = std::stoi(timeStr.substr(0, colonPos));
+    int m = std::stoi(timeStr.substr(colonPos + 1));
     return h * 60 + m;
 }
 

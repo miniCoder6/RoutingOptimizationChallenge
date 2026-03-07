@@ -134,15 +134,36 @@ void printSolution(const Solver::Solution &sol,
             if (i == 0)
             {
                 current_time = std::max((double)v.available_from, (double)curr_node.earliest_time);
+
+                // --- FIX: Delay departure to arrive exactly at the first pickup time ---
+                if (route_nodes.size() > 1)
+                {
+                    int next_id = route_nodes[1];
+                    const Node &next_node = gb.nodes[next_id];
+
+                    if (next_node.type != Node::DUMMY_END)
+                    {
+                        std::string c1 = curr_node.getMatrixId(requests, vehicles);
+                        std::string c2 = next_node.getMatrixId(requests, vehicles);
+
+                        double dist_km = getDistanceFromMatrix(c1, c2);
+                        double speed = (v.avg_speed_kmh > 0) ? v.avg_speed_kmh : 30.0;
+                        double travel_time_to_first = (dist_km / speed) * 60.0;
+
+                        // If leaving right now gets us there before the earliest pickup, delay the start
+                        if (current_time + travel_time_to_first < next_node.earliest_time)
+                        {
+                            current_time = next_node.earliest_time - travel_time_to_first;
+                        }
+                    }
+                }
+
                 start_shift_time = current_time;
             }
             else
             {
                 int prev_id = route_nodes[i - 1];
                 const Node &prev_node = gb.nodes[prev_id];
-
-                // Coords c1 = prev_node.getCoords(requests, vehicles);
-                // Coords c2 = curr_node.getCoords(requests, vehicles);
 
                 std::string c1 = prev_node.getMatrixId(requests, vehicles);
                 std::string c2 = curr_node.getMatrixId(requests, vehicles);
@@ -217,23 +238,10 @@ void printSolution(const Solver::Solution &sol,
                     dist_str = "0.00 km";
                 else
                 {
-                    // std::string c2;
-                    // if (next_node.type == Node::DELIVERY || next_node.type == Node::DUMMY_END)
-                    //     c2 = "OFFICE";
-                    // else
-                    //     c2 = next_node.getMatrixId(requests, vehicles);
-                    // std::string c1;
-                    // if (curr_node.type == Node::DELIVERY || curr_node.type == Node::DUMMY_END)
-                    //     c1 = "OFFICE";
-                    // else
-                    //     c1 = curr_node.getMatrixId(requests, vehicles);
-                    // // double d = getDistance(curr_node.getCoords(requests, vehicles), next_node.getCoords(requests, vehicles));
-                    // double d = getDistanceFromMatrix(c1, c2);
-                    // SIMPLIFIED LOGIC:
                     std::string c1 = curr_node.getMatrixId(requests, vehicles);
                     std::string c2 = next_node.getMatrixId(requests, vehicles);
 
-                    std::cout << c1 << " " << c2 << std::endl;
+                    // std::cout << c1 << " " << c2 << std::endl; // Optional debug print
 
                     double d = getDistanceFromMatrix(c1, c2);
                     std::ostringstream oss;
@@ -254,7 +262,6 @@ void printSolution(const Solver::Solution &sol,
         double vehicle_duration = current_time - start_shift_time;
 
         // --- CALCULATE INDIVIDUAL VEHICLE COST ---
-        // This is the specific cost for this vehicle based on its unique rate
         double vehicle_cost = vehicle_total_dist * v.cost_per_km;
 
         grand_total_dist += vehicle_total_dist;
@@ -300,7 +307,7 @@ void printSolution(const Solver::Solution &sol,
 
     std::cout << "=============================================================\n";
 
-    // Write CSVs (same as before) ...
+    // Write CSVs
     {
         fs::path veh_out_path = base_dir / "Branch-And-Cut/output_vehicle.csv";
         std::ofstream fout(veh_out_path);
