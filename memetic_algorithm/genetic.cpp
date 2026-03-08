@@ -1049,6 +1049,99 @@ void writeCSVOutput(const string &filename,
     file.close();
 }
 
+void writeBaseline(const string &filename,
+                   const Chromosome &solution,
+                   const vector<Person> &persons,
+                   const vector<Driver> &drivers)
+{
+    ofstream file(filename);
+    if (!file.is_open())
+    {
+        cerr << "Error: Cannot create " << filename << "\n";
+        return;
+    }
+
+    // Structure to store results for sorting
+    struct BaselineEntry {
+        string id;
+        double cost;
+        int time;
+    };
+    vector<BaselineEntry> entries;
+
+    int N = persons.size();
+    map<int, vector<Chromosome::Trip>> driverTrips;
+    for (const auto &t : solution.schedule)
+        driverTrips[t.vehicleIdx].push_back(t);
+
+    for (auto &dt : driverTrips)
+    {
+        int vIdx = dt.first;
+        const Driver &d = drivers[vIdx];
+        double currentTime = (double)d.start_time;
+
+        for (int i = 0; i < (int)dt.second.size(); i++)
+        {
+            auto &trip = dt.second[i];
+            int numPax = trip.customers.size();
+            
+            // Calculate actual trip distance
+            int firstC = trip.customers[0];
+            double tripDist = (i == 0) ? getDistVP(vIdx, firstC, N) : getDistOP(firstC, N);
+            
+            string fromId = (i == 0) ? d.original_id : OFFICE_ID;
+            double travel = getTravelTime(fromId, persons[firstC].original_id, d.speed_kmph);
+            currentTime = max(currentTime + travel, (double)persons[firstC].early_pickup);
+
+            vector<double> pickupTimes;
+            pickupTimes.push_back(currentTime);
+            int prevCust = firstC;
+
+            for (size_t k = 1; k < trip.customers.size(); k++)
+            {
+                int cIdx = trip.customers[k];
+                tripDist += getDistPP(prevCust, cIdx);
+                double t_leg = getTravelTime(persons[prevCust].original_id, persons[cIdx].original_id, d.speed_kmph);
+                currentTime = max(currentTime + t_leg, (double)persons[cIdx].early_pickup);
+                pickupTimes.push_back(currentTime);
+                prevCust = cIdx;
+            }
+
+            tripDist += getDistPO(prevCust, N);
+            double arrivalOffice = currentTime + getTravelTime(persons[prevCust].original_id, OFFICE_ID, d.speed_kmph);
+
+            // Real monetary cost = distance * cost_per_km
+            double realTripMonetaryCost = tripDist * d.cost_per_km;
+            double sharePerPerson = realTripMonetaryCost / (double)numPax;
+
+            for (size_t k = 0; k < trip.customers.size(); k++)
+            {
+                int empIdx = trip.customers[k];
+                int rideTime = (int)round(arrivalOffice - pickupTimes[k]);
+                
+                entries.push_back({persons[empIdx].original_id, sharePerPerson, rideTime});
+            }
+            currentTime = arrivalOffice;
+        }
+    }
+
+    // Sort entries by employee ID (e.g., E01, E02...)
+    sort(entries.begin(), entries.end(), [](const BaselineEntry &a, const BaselineEntry &b) {
+        return a.id < b.id;
+    });
+
+    // Write to CSV
+    file << "employee_id,baseline_cost,baseline_time_min\n";
+    for (const auto &entry : entries)
+    {
+        file << entry.id << ","
+             << fixed << setprecision(5) << entry.cost << "," 
+             << entry.time << "\n";
+    }
+
+    file.close();
+}
+
 int main(int argc, char *argv[])
 {
     if (argc < 2)
@@ -1226,7 +1319,9 @@ int main(int argc, char *argv[])
     cout << "\n[INFO] Writing final solution...\n";
     writeCSVOutput(basePath + "memetic_algorithm/output_vehicle.csv",
                    bestEver, persons, drivers, metrics.weightedObjective, penaltyComponent);
-
+    
+    writeBaseline(basePath + "memetic_algorithm/output_employees.csv",
+                   bestEver, persons, drivers);
     cout << "\n"
          << string(80, '=') << "\n";
     cout << "                    FINAL METRICS BREAKDOWN\n";
