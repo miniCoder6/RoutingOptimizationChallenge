@@ -43,6 +43,7 @@ int getPriorityDelay(int priority)
 double INFEASIBILITY_PENALTY = 0.0;
 double PENALTY_PREMIUM_VEHICLE = 500000.0;
 double PENALTY_SHARING_PREFERENCE = 500000.0;
+double PENALTY_CAPACITY_EXCEEDED = 500000.0;
 
 enum VehicleCat
 {
@@ -554,10 +555,12 @@ void evaluateImported(Chromosome &chromo,
         double penalty = 0.0;
         const double EPSILON = 5;
         int groupSize = customers.size();
+        int runningLoad = 0;
 
         for (size_t k = 0; k < customers.size(); k++)
         {
             int pIdx = customers[k];
+            runningLoad += persons[pIdx].load;
 
             double allowedLateDrop = (double)persons[pIdx].late_drop + (double)getPriorityDelay(persons[pIdx].priority);
             if (arrivalOffice > allowedLateDrop + EPSILON)
@@ -576,6 +579,18 @@ void evaluateImported(Chromosome &chromo,
             {
                 penalty += PENALTY_PREMIUM_VEHICLE;
                 cout << persons[pIdx].original_id << " " << penalty << "vehicle pref penalty" << "\n";
+            }
+
+            if (runningLoad > d.capacity)
+            {
+                double segment_end_time = (k + 1 < customers.size()) ? pickupTimes[k + 1] : arrivalOffice;
+                double segment_duration = segment_end_time - pickupTimes[k];
+
+                double capPenalty = PENALTY_CAPACITY_EXCEEDED * (runningLoad - d.capacity) * segment_duration;
+                penalty += capPenalty;
+
+                cout << d.original_id << " overloaded by " << (runningLoad - d.capacity)
+                     << " for " << segment_duration << " mins. Penalty: " << capPenalty << "\n";
             }
         }
 
@@ -747,16 +762,27 @@ void splitProcedure(Chromosome &chromo,
 
                 double penalty = sharingPenalty + vehiclePenalty;
                 const double EPSILON = 1e-5;
+                int runningLoad = 0;
 
                 for (int p = i; p < j; p++)
                 {
                     int pIdx = chromo.giantTour[p];
                     double actualPickup = pickupTimes[p - i];
+                    runningLoad += persons[pIdx].load;
 
                     // 1. Check Late Drop Penalty
                     double allowedLateDrop = (double)persons[pIdx].late_drop + (double)getPriorityDelay(persons[pIdx].priority);
                     if (arrivalAtOffice > allowedLateDrop + EPSILON)
                         penalty += INFEASIBILITY_PENALTY * (arrivalAtOffice - allowedLateDrop);
+
+                    if (runningLoad > d.capacity)
+                    {
+                        double segment_start = pickupTimes[p - i];
+                        double segment_end = (p + 1 < j) ? pickupTimes[p - i + 1] : arrivalAtOffice;
+                        double segment_duration = segment_end - segment_start;
+
+                        penalty += PENALTY_CAPACITY_EXCEEDED * (runningLoad - d.capacity) * segment_duration;
+                    }
                 }
 
                 double totalPassengerRideTime = 0.0;
