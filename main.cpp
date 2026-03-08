@@ -423,11 +423,11 @@ int main()
         std::string empData = get_part("employees");
         std::string vehData = get_part("vehicles");
         std::string metaData = get_part("metadata");
-
+        std::string baseData = get_part("basedata");
         std::string modeData = get_part("optimizationLevel");
 
-        if (empData.empty() || vehData.empty() || metaData.empty() || modeData.empty()) {
-            return crow::response(400, "Missing one of the 3 CSVs (employees, vehicles, metadata, mode).");
+        if (empData.empty() || vehData.empty() || metaData.empty() || modeData.empty() || baseData.empty()) {
+            return crow::response(400, "Missing one of the 4 CSVs (employees, vehicles, metadata, baseline, mode).");
         }
 
         // 2. Setup Temp Directory (Absolute Path)
@@ -444,6 +444,8 @@ int main()
         saveFile((reqDir / "employees.csv").string(), empData);
         saveFile((reqDir / "vehicles.csv").string(), vehData);
         saveFile((reqDir / "metadata.csv").string(), metaData);
+        saveFile((reqDir / "baseline.csv").string(), baseData);
+
 
         saveFile((reqDir / "mode.txt").string(), modeData);
 
@@ -479,6 +481,10 @@ int main()
         //t5.join();
         t6.join();
         
+        //Calculate cost saved and time saved here
+        std::string cost_saved;
+        std::string time_saved;
+
         // 6. Build Response
         json response;
         response["status"] = "finished";
@@ -534,6 +540,8 @@ int main()
             {"csv_vehicle", mem.output_vehicle},
             {"csv_employee", mem.output_employee}
         };
+
+        
 
         crow::response res(200, response.dump());
         res.add_header("Access-Control-Allow-Origin", "*");

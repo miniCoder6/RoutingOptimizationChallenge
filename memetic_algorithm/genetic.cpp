@@ -1050,6 +1050,7 @@ void writeCSVOutput(const string &filename,
 }
 
 void writeBaseline(const string &filename,
+                   const string &baseline,
                    const Chromosome &solution,
                    const vector<Person> &persons,
                    const vector<Driver> &drivers)
@@ -1062,7 +1063,8 @@ void writeBaseline(const string &filename,
     }
 
     // Structure to store results for sorting
-    struct BaselineEntry {
+    struct BaselineEntry
+    {
         string id;
         double cost;
         int time;
@@ -1084,11 +1086,11 @@ void writeBaseline(const string &filename,
         {
             auto &trip = dt.second[i];
             int numPax = trip.customers.size();
-            
+
             // Calculate actual trip distance
             int firstC = trip.customers[0];
             double tripDist = (i == 0) ? getDistVP(vIdx, firstC, N) : getDistOP(firstC, N);
-            
+
             string fromId = (i == 0) ? d.original_id : OFFICE_ID;
             double travel = getTravelTime(fromId, persons[firstC].original_id, d.speed_kmph);
             currentTime = max(currentTime + travel, (double)persons[firstC].early_pickup);
@@ -1118,7 +1120,7 @@ void writeBaseline(const string &filename,
             {
                 int empIdx = trip.customers[k];
                 int rideTime = (int)round(arrivalOffice - pickupTimes[k]);
-                
+
                 entries.push_back({persons[empIdx].original_id, sharePerPerson, rideTime});
             }
             currentTime = arrivalOffice;
@@ -1126,16 +1128,97 @@ void writeBaseline(const string &filename,
     }
 
     // Sort entries by employee ID (e.g., E01, E02...)
-    sort(entries.begin(), entries.end(), [](const BaselineEntry &a, const BaselineEntry &b) {
-        return a.id < b.id;
-    });
+    sort(entries.begin(), entries.end(), [](const BaselineEntry &a, const BaselineEntry &b)
+         { return a.id < b.id; });
+
+    // --- NEW: Read original baseline file and calculate savings safely ---
+    map<string, pair<double, int>> baselineData;
+    ifstream baseFile(baseline);
+    if (baseFile.is_open())
+    {
+        string line;
+        getline(baseFile, line); // Skip the header row
+        int rowCount = 2;        // Keep track for error logging
+
+        while (getline(baseFile, line))
+        {
+            // Strip trailing carriage return if it exists
+            if (!line.empty() && line.back() == '\r')
+                line.pop_back();
+            if (line.empty())
+            {
+                rowCount++;
+                continue;
+            }
+
+            stringstream ss(line);
+            string id, costStr, timeStr;
+
+            // Check if all 3 columns exist
+            if (getline(ss, id, ',') && getline(ss, costStr, ',') && getline(ss, timeStr, ','))
+            {
+                id = trim(id);
+                try
+                {
+                    // Try to convert, catch if it fails (e.g. empty, "N/A", text)
+                    double cost = stod(trim(costStr));
+                    int time = stoi(trim(timeStr));
+                    baselineData[id] = {cost, time};
+                }
+                catch (const std::exception &e)
+                {
+                    cerr << "[WARN] Invalid data in baseline.csv at row " << rowCount
+                         << " for ID " << id << ". Skipping. Error: " << e.what() << "\n";
+                }
+            }
+            else
+            {
+                cerr << "[WARN] Missing columns in baseline.csv at row " << rowCount << ". Skipping.\n";
+            }
+            rowCount++;
+        }
+        baseFile.close();
+    }
+    else
+    {
+        cerr << "[WARN] Could not open baseline.csv. Savings will be calculated as 0.\n";
+    }
+
+    double totalCostSaved = 0.0;
+    int totalTimeSaved = 0;
+    int matchedRecords = 0; // Track how many we actually compared
+
+    for (const auto &entry : entries)
+    {
+        if (baselineData.find(entry.id) != baselineData.end())
+        {
+            // Savings = Original Baseline - Current Solution
+            totalCostSaved += (baselineData[entry.id].first - entry.cost);
+            totalTimeSaved += (baselineData[entry.id].second - entry.time);
+            matchedRecords++;
+        }
+    }
+
+    // Warn the user if the data was partial
+    if (matchedRecords != entries.size())
+    {
+        cout << "[WARN] Baseline comparison is partial. Matched " << matchedRecords
+             << " out of " << entries.size() << " employees.\n";
+    }
+    // --------------------------------------------------------------
 
     // Write to CSV
-    file << "employee_id,baseline_cost,baseline_time_min\n";
+    // 1. Output the savings on the first line (Added a comma so it remains valid CSV)
+    file << fixed << setprecision(3) << totalCostSaved << "," << totalTimeSaved << "\n";
+
+    // 2. Output standard headers
+    file << "employee_id,cost,time_min\n";
+
+    // 3. Output the individual data
     for (const auto &entry : entries)
     {
         file << entry.id << ","
-             << fixed << setprecision(5) << entry.cost << "," 
+             << fixed << setprecision(5) << entry.cost << ","
              << entry.time << "\n";
     }
 
@@ -1319,9 +1402,9 @@ int main(int argc, char *argv[])
     cout << "\n[INFO] Writing final solution...\n";
     writeCSVOutput(basePath + "memetic_algorithm/output_vehicle.csv",
                    bestEver, persons, drivers, metrics.weightedObjective, penaltyComponent);
-    
-    writeBaseline(basePath + "memetic_algorithm/output_employees.csv",
-                   bestEver, persons, drivers);
+
+    writeBaseline(basePath + "memetic_algorithm/output_employees.csv", basePath + "baseline.csv",
+                  bestEver, persons, drivers);
     cout << "\n"
          << string(80, '=') << "\n";
     cout << "                    FINAL METRICS BREAKDOWN\n";
