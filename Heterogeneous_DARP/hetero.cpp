@@ -22,9 +22,7 @@ namespace fs = std::filesystem;
 #define M_PI 3.14159265358979323846
 #endif
 
-// ==========================================
 // 1. DATA STRUCTURES & FAST MATRIX
-// ==========================================
 
 const double INF = std::numeric_limits<double>::max();
 
@@ -109,7 +107,6 @@ struct Request
     bool pref_premium = false;
     int max_sharing = 1000;
 
-    // NEW: Integer ID for O(1) matrix lookup
     int matrix_id = -1;
 };
 
@@ -126,7 +123,6 @@ struct Vehicle
 
     bool is_premium = false;
 
-    // NEW: Integer ID for O(1) matrix lookup
     int matrix_id = -1;
 };
 
@@ -150,9 +146,7 @@ struct RouteMetrics
     double objective_score;
 };
 
-// ==========================================
 // 2. FILE LOADING & INITIALIZATION
-// ==========================================
 
 void loadMetadata(const std::string &filename, Config &config)
 {
@@ -318,7 +312,7 @@ std::vector<Request> loadRequests(const std::string &filename, const std::vector
     return requests;
 }
 
-// NEW: Build the O(1) Matrix
+// Build the O(1) Matrix
 void buildFastMatrix(std::vector<Vehicle> &vehicles, std::vector<Request> &requests)
 {
     int total_nodes = vehicles.size() + requests.size() + 1;
@@ -341,7 +335,6 @@ void buildFastMatrix(std::vector<Vehicle> &vehicles, std::vector<Request> &reque
     office_matrix_id = current_id;
     id_to_str[current_id++] = "OFFICE";
 
-    // Call the external string-based function exactly ONCE per pair
     for (int i = 0; i < total_nodes; ++i)
     {
         for (int j = 0; j < total_nodes; ++j)
@@ -352,21 +345,17 @@ void buildFastMatrix(std::vector<Vehicle> &vehicles, std::vector<Request> &reque
     std::cout << "Fast O(1) distance matrix built successfully.\n";
 }
 
-// ==========================================
 // 4. CORE LOGIC (VNS)
-// ==========================================
 
 class Route
 {
 public:
     int vehicle_index;
     std::vector<Node> sequence;
-    std::vector<int> served_employees; // PERF: changed from std::set<int> for better cache locality and O(1) random access
+    std::vector<int> served_employees;
 
     Route(int v_idx) : vehicle_index(v_idx) {}
 
-    // PERF: added update_times param (default false) so evaluate is non-mutating by default,
-    // eliminating the need to copy routes before scoring them.
     RouteMetrics evaluate(const std::vector<Vehicle> &vehicles, const std::vector<Request> &requests, const Config &config, bool update_times = false)
     {
         const Vehicle &veh = vehicles[vehicle_index];
@@ -411,7 +400,6 @@ public:
                     current_time = req.earliest_pickup;
             }
 
-            // PERF: only write arrival_time when explicitly requested (e.g. final output)
             if (update_times)
                 node.arrival_time = current_time;
 
@@ -518,7 +506,7 @@ public:
         {
             if (route.sequence.empty())
                 continue;
-            // PERF: evaluate directly without copying — safe because evaluate() is non-mutating by default
+
             RouteMetrics m = route.evaluate(vehicles, requests, config);
             score += m.objective_score;
             if (!m.feasible)
@@ -537,12 +525,10 @@ class VNSSolver
     Config config;
     std::mt19937 rng;
 
-    // PERF: reusable scratch buffers — avoids heap allocation on every evaluateRoute() call
     std::vector<double> pickup_times_buf;
     std::vector<int> onboard_buf;
-    Route scratch_route; // PERF: reusable scratch route for localSearch() — avoids copying served_employees set
+    Route scratch_route;
 
-    // PERF: solver-level evaluate that reuses member scratch buffers instead of allocating per call
     RouteMetrics evaluateRoute(Route &route, bool update_times = false)
     {
         const Vehicle &veh = vehicles[route.vehicle_index];
@@ -554,7 +540,6 @@ class VNSSolver
         double total_passenger_time = 0.0;
         int current_load = 0;
 
-        // PERF: .assign() and .clear() reuse existing capacity — no heap allocation
         pickup_times_buf.assign(requests.size(), 0.0);
         onboard_buf.clear();
 
@@ -606,7 +591,6 @@ class VNSSolver
                 double drop_time = current_time;
                 current_load--;
 
-                // PERF: swap-with-back + pop_back instead of find + erase (avoids shifting)
                 auto it = std::find(onboard_buf.begin(), onboard_buf.end(), node.emp_index);
                 if (it != onboard_buf.end())
                 {
@@ -693,7 +677,7 @@ public:
 
                 if (!m.feasible && !route.served_employees.empty())
                 {
-                    // PERF: direct index access on vector (was std::advance on set iterator)
+
                     std::uniform_int_distribution<int> dist(0, route.served_employees.size() - 1);
                     int emp_to_remove = route.served_employees[dist(rng)];
 
@@ -703,7 +687,6 @@ public:
                             new_seq.push_back(n);
                     route.sequence = new_seq;
 
-                    // PERF: swap-with-back + pop_back for O(1) vector removal (was set::erase)
                     auto it = std::find(route.served_employees.begin(), route.served_employees.end(), emp_to_remove);
                     if (it != route.served_employees.end())
                     {
@@ -722,11 +705,11 @@ public:
         for (int emp_idx : unassigned)
         {
             double best_insertion_cost = INF;
-            int best_r = -1; // PERF: store only best index, not best sequence (was best_seq vector copy)
+            int best_r = -1;
 
             for (size_t r = 0; r < sol.routes.size(); ++r)
             {
-                // PERF: evaluate in-place with push_back/pop_back — no Route copy per trial
+
                 Route &cur = sol.routes[r];
                 double base_score = evaluateRoute(cur).objective_score;
 
@@ -736,26 +719,18 @@ public:
                 cur.sequence.pop_back();
                 cur.sequence.pop_back();
 
-                //if (m.objective_score < base_score + 50000000.0)
-                //{
-                //    if (m.objective_score < best_insertion_cost)
-                //    {
-                //        best_insertion_cost = m.objective_score;
-                //        best_r = r;
-                 //   }
-                //}
-                 if (m.objective_score < best_insertion_cost)
-                 {
-                     best_insertion_cost = m.objective_score;
-                     best_r = r;
-                 }
+                if (m.objective_score < best_insertion_cost)
+                {
+                    best_insertion_cost = m.objective_score;
+                    best_r = r;
+                }
             }
 
             if (best_r != -1)
             {
                 sol.routes[best_r].sequence.push_back({PICKUP, emp_idx, 0, 0});
                 sol.routes[best_r].sequence.push_back({DROP, emp_idx, 0, 0});
-                sol.routes[best_r].served_employees.push_back(emp_idx); // PERF: push_back (was set::insert)
+                sol.routes[best_r].served_employees.push_back(emp_idx);
             }
             else
             {
@@ -780,11 +755,11 @@ public:
         {
             double best_score = INF;
             int best_r = -1;
-            int best_i = -1, best_j = -1; // PERF: store position indices instead of copying best_seq vector
+            int best_i = -1, best_j = -1;
 
             for (size_t r = 0; r < sol.routes.size(); ++r)
             {
-                // PERF: in-place insert/erase on actual route instead of creating temp vectors per (i,j)
+
                 Route &cur = sol.routes[r];
                 int n = cur.sequence.size();
                 for (int i = 0; i <= n; ++i)
@@ -811,7 +786,7 @@ public:
             {
                 sol.routes[best_r].sequence.insert(sol.routes[best_r].sequence.begin() + best_i, {PICKUP, emp_idx, 0, 0});
                 sol.routes[best_r].sequence.insert(sol.routes[best_r].sequence.begin() + best_j, {DROP, emp_idx, 0, 0});
-                sol.routes[best_r].served_employees.push_back(emp_idx); // PERF: push_back (was set::insert)
+                sol.routes[best_r].served_employees.push_back(emp_idx);
             }
             else
             {
@@ -834,12 +809,10 @@ public:
                 improved = false;
                 double current_score = evaluateRoute(route).objective_score;
 
-                // PERF: iterate by index on vector (was copy-to-vector from set)
                 for (size_t emp_i = 0; emp_i < route.served_employees.size(); ++emp_i)
                 {
                     int emp = route.served_employees[emp_i];
 
-                    // PERF: use scratch_route to avoid copying served_employees set in inner loop
                     scratch_route.vehicle_index = route.vehicle_index;
                     scratch_route.sequence.clear();
                     for (auto &n : route.sequence)
@@ -849,7 +822,7 @@ public:
                     int n = scratch_route.sequence.size();
                     for (int i = 0; i <= n; ++i)
                     {
-                        // PERF: in-place insert/erase on scratch route instead of creating new vectors
+
                         scratch_route.sequence.insert(scratch_route.sequence.begin() + i, {PICKUP, emp, 0, 0});
                         for (int j = i + 1; j <= n + 1; ++j)
                         {
@@ -889,7 +862,6 @@ public:
             if (sol.routes[r_idx].served_employees.empty())
                 continue;
 
-            // PERF: direct index access on vector (was std::advance on set iterator)
             std::uniform_int_distribution<int> emp_dist(0, sol.routes[r_idx].served_employees.size() - 1);
             int emp = sol.routes[r_idx].served_employees[emp_dist(rng)];
 
@@ -899,7 +871,6 @@ public:
                     new_seq.push_back(n);
             sol.routes[r_idx].sequence = new_seq;
 
-            // PERF: swap-with-back + pop_back for O(1) vector removal (was set::erase)
             auto it = std::find(sol.routes[r_idx].served_employees.begin(), sol.routes[r_idx].served_employees.end(), emp);
             if (it != sol.routes[r_idx].served_employees.end())
             {
@@ -911,7 +882,7 @@ public:
             int dest = route_dist(rng);
             sol.routes[dest].sequence.push_back({PICKUP, emp, 0, 0});
             sol.routes[dest].sequence.push_back({DROP, emp, 0, 0});
-            sol.routes[dest].served_employees.push_back(emp); // PERF: push_back (was set::insert)
+            sol.routes[dest].served_employees.push_back(emp);
         }
     }
 
@@ -935,7 +906,7 @@ public:
             s_prime.calculateTotalScore(vehicles, requests, config);
             if (s_prime.total_score < current_sol.total_score)
             {
-                current_sol = std::move(s_prime); // PERF: move instead of copy to avoid deep-copying all route data
+                current_sol = std::move(s_prime);
                 k = 1;
                 if (current_sol.total_score < best_sol.total_score)
                 {
@@ -952,7 +923,7 @@ public:
             auto cur = std::chrono::high_resolution_clock::now();
             std::chrono::duration<double> elapsed = cur - st;
 
-            if (elapsed.count() >= 60)
+            if (elapsed.count() >= max_time)
             {
                 break;
             }
@@ -961,21 +932,23 @@ public:
     }
 };
 
-// ==========================================
-// 6. MAIN
-// ==========================================
+// 5. MAIN
 
 int main(int argc, char **argv)
 {
-    // 1. Check for single argument (the temp directory)
+
     if (argc < 2)
     {
         std::cerr << "Usage: " << argv[0] << " <temp_directory_path>\n";
         return 1;
     }
 
-    // 2. Set up filesystem path
     fs::path base_dir = argv[1];
+
+    fs::path mode_path = base_dir / "mode.txt";
+
+    std::ifstream f1(mode_path);
+    f1 >> max_time;
 
     if (!fs::exists(base_dir))
     {
@@ -987,7 +960,6 @@ int main(int argc, char **argv)
 
     Config config;
 
-    // 3. Define Input Paths (All inside base_dir)
     fs::path metadata_path = base_dir / "metadata.csv";
     fs::path vehicles_path = base_dir / "vehicles.csv";
     fs::path employees_path = base_dir / "employees.csv";
@@ -998,6 +970,22 @@ int main(int argc, char **argv)
 
     std::cout << "Loading data...\n";
     std::vector<Vehicle> vehicles = loadVehicles(vehicles_path.string());
+
+    if (!vehicles.empty())
+    {
+        double max_cost_per_km = 0.0;
+        for (const auto &v : vehicles)
+        {
+            if (v.cost_per_km > max_cost_per_km)
+            {
+                max_cost_per_km = v.cost_per_km;
+            }
+        }
+
+        // Apply the dynamic penalties
+        config.alpha = 500.0 * max_cost_per_km;
+        config.beta = 1000.0 * max_cost_per_km;
+    }
     std::vector<Request> requests = loadRequests(employees_path.string(), config.max_delays);
 
     if (requests.empty() || vehicles.empty())
@@ -1019,7 +1007,6 @@ int main(int argc, char **argv)
     registerMatrixId("OFFICE", N + V);                    // also reachable by string
     loadMatrix(matrix_path.string(), matrix_size);
 
-    // NEW: Build the O(1) Matrix right after loading
     std::cout << "Building fast lookup matrix...\n";
     buildFastMatrix(vehicles, requests);
 
@@ -1043,13 +1030,11 @@ int main(int argc, char **argv)
     std::cout << "Unassigned Employees: " << final_solution.unassigned_requests.size() << "\n";
     std::cout << "Iterations: " << iterations_done << "\n";
 
-    // === 4. OUTPUT GENERATION (DIRECTLY IN TEMP DIR) ===
     std::cout << "Generating CSV files...\n";
 
     fs::path emp_out_path = base_dir / "Heterogeneous_DARP" / "output_employees.csv";
     fs::path veh_out_path = base_dir / "Heterogeneous_DARP" / "output_vehicle.csv";
 
-    // Ensure the output directory exists before writing
     fs::create_directories(emp_out_path.parent_path());
 
     std::ofstream emp_file(emp_out_path);

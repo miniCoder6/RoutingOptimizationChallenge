@@ -31,4 +31,6 @@ void loadMatrix(const std::string &filename, DARPInstance &instance,
                 int num_employees, int num_vehicles,
                 int pickup_base, int delivery_base);
 
-void write_output_csvs(const Solution &solution, DARPInstance &instance, std::string base);
+void write_output_csvs(const Solution &solution, DARPInstance &instance, std::string base, double objective_cost);
+
+long long read_runtime_limit(const std::string &filename);

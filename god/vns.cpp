@@ -1,5 +1,6 @@
 #include <iostream>
 #include <iomanip>
+#include <chrono>
 #include "vns.h"
 #include "init_sol.h"
 #include "params.h"
@@ -12,16 +13,11 @@
 static std::random_device rd;
 static std::mt19937 gen(rd());
 
-/**
- * Selects h requests randomly and moves them to other routes.
- * Works IN-PLACE on the solution.
- * Returns true if modifications were made.
- */
-// Helper: save a route's sequence and stats to backups if not already saved
 static void backup_route(RouteBackups &backups, int idx, const Route &route)
 {
     for (auto &b : backups)
-        if (b.index == idx) return;
+        if (b.index == idx)
+            return;
     backups.push_back({idx, route.sequence, route.f1, route.f2,
                        route.viol_cap, route.viol_tw, route.viol_ride,
                        route.total_distance, route.total_duration, route.is_feasible});
@@ -73,7 +69,6 @@ bool neighborhood_move(Solution &solution, int h, DARPInstance &instance, RouteB
 
         backup_route(backups, source_idx, source_route);
 
-        // Save current sequence before erasing so we can restore just this step
         std::vector<int> seq_before_erase = source_route.sequence;
 
         auto &seq = source_route.sequence;
@@ -92,7 +87,6 @@ bool neighborhood_move(Solution &solution, int h, DARPInstance &instance, RouteB
         }
         if (potential_indices.empty())
         {
-            // No compatible route — restore source route to pre-erase state
             source_route.sequence = std::move(seq_before_erase);
             source_route.stats_valid = false;
             continue;
@@ -121,10 +115,6 @@ bool neighborhood_move(Solution &solution, int h, DARPInstance &instance, RouteB
     return modified;
 }
 
-/**
- * Exchanges sequences between two routes.
- * Works IN-PLACE on the solution.
- */
 bool neighborhood_swap(Solution &solution, int h, DARPInstance &instance, RouteBackups &backups)
 {
     std::vector<int> route_indices;
@@ -196,7 +186,6 @@ bool neighborhood_swap(Solution &solution, int h, DARPInstance &instance, RouteB
     std::vector<int> req_ids_1 = extract_random_request_ids(&r1, len1);
     std::vector<int> req_ids_2 = extract_random_request_ids(&r2, len2);
 
-    // Compatibility checks using bitmask
     for (int req_id : req_ids_1)
     {
         const Request &req = instance.get_request(req_id);
@@ -213,7 +202,6 @@ bool neighborhood_swap(Solution &solution, int h, DARPInstance &instance, RouteB
     backup_route(backups, route_indices[idx1], r1);
     backup_route(backups, route_indices[idx2], r2);
 
-    // Remove from both routes
     for (int req_id : req_ids_1)
     {
         const Request &req = instance.get_request(req_id);
@@ -232,7 +220,6 @@ bool neighborhood_swap(Solution &solution, int h, DARPInstance &instance, RouteB
     r1.invalidate_stats();
     r2.invalidate_stats();
 
-    // Insert seq1 into r2
     for (int req_id : req_ids_1)
     {
         const Request &req = instance.get_request(req_id);
@@ -246,7 +233,6 @@ bool neighborhood_swap(Solution &solution, int h, DARPInstance &instance, RouteB
         r2.sequence.insert(r2.sequence.begin() + j_pos, req.delivery_node.id);
     }
 
-    // Insert seq2 into r1
     for (int req_id : req_ids_2)
     {
         const Request &req = instance.get_request(req_id);
@@ -309,7 +295,6 @@ bool neighborhood_chain(Solution &solution, int h, DARPInstance &instance, Route
 
         backup_route(backups, current_idx, *current);
 
-        // Save current sequence before erasing so we can restore just this step
         std::vector<int> seq_before_erase = current->sequence;
 
         auto &seq = current->sequence;
@@ -329,7 +314,6 @@ bool neighborhood_chain(Solution &solution, int h, DARPInstance &instance, Route
         }
         if (potential_indices.empty())
         {
-            // No compatible route — restore current route to pre-erase state
             current->sequence = std::move(seq_before_erase);
             current->stats_valid = false;
             break;
@@ -359,18 +343,11 @@ bool neighborhood_chain(Solution &solution, int h, DARPInstance &instance, Route
     return modified;
 }
 
-/**
- * Single-pass local search (no convergence loop).
- * For each route, tries repositioning each request to its best position.
- * Uses in-place remove/restore to avoid vector copies.
- */
 void apply_local_search(Solution &solution, DARPInstance &instance)
 {
     for (auto &route : solution.routes)
     {
-        // Skip routes that weren't modified by the neighborhood operation.
-        // Between iterations, all routes have stats_valid = true.
-        // Neighborhood ops invalidate only the routes they touch.
+
         if (route.sequence.empty() || route.stats_valid)
             continue;
 
@@ -392,7 +369,6 @@ void apply_local_search(Solution &solution, DARPInstance &instance)
             const Request &req = instance.get_request(req_id);
             int d_node_id = req.delivery_node.id;
 
-            // Find positions of P and D in-place (avoids vector copies)
             auto &seq = route.sequence;
             int p_pos = -1, d_pos = -1;
             for (int idx = 0; idx < (int)seq.size(); ++idx)
@@ -405,7 +381,6 @@ void apply_local_search(Solution &solution, DARPInstance &instance)
             if (p_pos == -1 || d_pos == -1)
                 continue;
 
-            // Remove larger index first to preserve smaller index
             int first_pos = std::min(p_pos, d_pos);
             int second_pos = std::max(p_pos, d_pos);
             int first_id = seq[first_pos];
@@ -428,7 +403,6 @@ void apply_local_search(Solution &solution, DARPInstance &instance)
             }
             else
             {
-                // Restore in-place (insert smaller index first, then larger)
                 seq.insert(seq.begin() + first_pos, first_id);
                 seq.insert(seq.begin() + second_pos, second_id);
                 route.invalidate_stats();
@@ -442,13 +416,14 @@ Solution vns1(
     const Solution &initial_solution,
     DARPInstance &instance,
     long long int k_max,
-    int h)
+    int h,
+    double max_time_seconds)
 {
+    auto vns_start_time = std::chrono::high_resolution_clock::now();
     Solution current = initial_solution;
 
     apply_local_search(current, instance);
 
-    // Try to reinsert any initially unassigned requests
     if (!current.unassigned_requests.empty())
     {
         std::vector<int> still_unassigned;
@@ -498,9 +473,16 @@ Solution vns1(
 
     while (current_iteration <= k_max)
     {
+        auto current_time = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<double> elapsed = current_time - vns_start_time;
+        if (elapsed.count() >= max_time_seconds)
+        {
+            std::cout << "Time limit reached (" << max_time_seconds << "s). Stopping at iteration " << current_iteration << ".\n";
+            break;
+        }
+
         RouteBackups backups;
         std::vector<int> unassigned_backup = current.unassigned_requests;
-        // Save solution-level costs for fast restore on reject
         double saved_f1 = current.f1, saved_f2 = current.f2, saved_f3 = current.f3;
 
         bool modified = false;
@@ -519,18 +501,20 @@ Solution vns1(
 
         if (!modified)
         {
-            // Restore any partially modified routes to their original state and stats
             for (auto &b : backups)
             {
                 Route &r = current.routes[b.index];
                 r.sequence = std::move(b.sequence);
-                r.f1 = b.f1; r.f2 = b.f2;
-                r.viol_cap = b.viol_cap; r.viol_tw = b.viol_tw; r.viol_ride = b.viol_ride;
-                r.total_distance = b.total_distance; r.total_duration = b.total_duration;
+                r.f1 = b.f1;
+                r.f2 = b.f2;
+                r.viol_cap = b.viol_cap;
+                r.viol_tw = b.viol_tw;
+                r.viol_ride = b.viol_ride;
+                r.total_distance = b.total_distance;
+                r.total_duration = b.total_duration;
                 r.is_feasible = b.is_feasible;
                 r.stats_valid = true;
             }
-            // No need to re-evaluate — solution-level f1/f2/f3 were never changed
             neighbourhood_index = (neighbourhood_index % NUM_NEIGHBOURHOODS) + 1;
             current_iteration++;
             continue;
@@ -538,7 +522,6 @@ Solution vns1(
 
         apply_local_search(current, instance);
 
-        // Try to reinsert unassigned requests
         if (!current.unassigned_requests.empty())
         {
             std::vector<int> still_unassigned;
@@ -584,7 +567,6 @@ Solution vns1(
 
         if (candidate_cost < best_cost)
         {
-            // Accept: discard backups, keep current as-is
             best_cost = candidate_cost;
             neighbourhood_index = 1;
 
@@ -593,20 +575,24 @@ Solution vns1(
         }
         else
         {
-            // Reject: restore modified routes from backups with saved stats
             for (auto &b : backups)
             {
                 Route &r = current.routes[b.index];
                 r.sequence = std::move(b.sequence);
-                r.f1 = b.f1; r.f2 = b.f2;
-                r.viol_cap = b.viol_cap; r.viol_tw = b.viol_tw; r.viol_ride = b.viol_ride;
-                r.total_distance = b.total_distance; r.total_duration = b.total_duration;
+                r.f1 = b.f1;
+                r.f2 = b.f2;
+                r.viol_cap = b.viol_cap;
+                r.viol_tw = b.viol_tw;
+                r.viol_ride = b.viol_ride;
+                r.total_distance = b.total_distance;
+                r.total_duration = b.total_duration;
                 r.is_feasible = b.is_feasible;
                 r.stats_valid = true;
             }
             current.unassigned_requests = std::move(unassigned_backup);
-            // Restore solution-level costs without recalculation
-            current.f1 = saved_f1; current.f2 = saved_f2; current.f3 = saved_f3;
+            current.f1 = saved_f1;
+            current.f2 = saved_f2;
+            current.f3 = saved_f3;
             neighbourhood_index = (neighbourhood_index % NUM_NEIGHBOURHOODS) + 1;
         }
 

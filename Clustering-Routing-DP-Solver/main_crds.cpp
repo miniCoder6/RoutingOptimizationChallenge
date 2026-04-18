@@ -17,24 +17,17 @@
 using namespace std;
 namespace fs = std::filesystem;
 
-/**
- * =========================================================
- * SECTION 1: SYSTEM CONFIGURATION & UTILITIES
- * =========================================================
- */
 const double INF = 1e18;
 
-// GLOBAL CONFIGURATION — penalty weights now match hetero.cpp
 struct Metadata
 {
-    double obj_cost_weight = 1.0; // matches hetero default (dist_cost=1.0)
-    double obj_time_weight = 0.0; // matches hetero default (time_cost=0.0)
+    double obj_cost_weight = 1.0;
+    double obj_time_weight = 0.0;
     map<int, double> priority_extensions;
 
-    // --- PENALTY WEIGHTS (matching hetero.cpp Config) ---
-    double alpha = 100000.0; // Ride Time Penalty
-    double beta = 1000.0;    // Time Window Penalty
-    double gamma = 500000.0; // Capacity / Sharing Penalty
+    double alpha = 100000.0;
+    double beta = 1000.0;
+    double gamma = 500000.0;
 };
 
 Metadata GLOBAL_CONFIG;
@@ -121,11 +114,6 @@ vector<string> splitCSVLine(const string &s)
     return tokens;
 }
 
-/**
- * =========================================================
- * SECTION 2: DATA STRUCTURE DEFINITIONS
- * =========================================================
- */
 struct Passenger
 {
     string id;
@@ -165,25 +153,19 @@ struct DPNode
 
 struct RouteResult
 {
-    double cost_dist;       // total km
-    double cost_money;      // total_dist * cost_per_km  (= total_cost in hetero)
-    double passenger_time;  // sum of actual ride times  (= total_time in hetero)
-    double weighted_score;  // base objective: (cost_weight * cost_money) + (time_weight * passenger_time)
-    double penalized_score; // weighted_score + alpha*ride_viol + beta*tw_viol + gamma*cap_viol
+    double cost_dist;
+    double cost_money;
+    double passenger_time;
+    double weighted_score;
+    double penalized_score;
     double finish_time;
-    bool valid; // true iff all violations < 1.0
+    bool valid;
 
-    // Violation components (matching hetero.cpp)
     double ride_time_violation;
     double time_window_violation;
     double capacity_violation;
 };
 
-/**
- * =========================================================
- * SECTION 3: METADATA LOADER
- * =========================================================
- */
 void loadMetadata(string filename)
 {
     ifstream file(filename);
@@ -263,7 +245,6 @@ void loadMetadata(string filename)
         }
     }
 
-    // Fill any missing priority extensions with defaults matching hetero.cpp
     if (!GLOBAL_CONFIG.priority_extensions.count(1))
         GLOBAL_CONFIG.priority_extensions[1] = 10;
     if (!GLOBAL_CONFIG.priority_extensions.count(2))
@@ -282,11 +263,6 @@ void loadMetadata(string filename)
          << ", gamma=" << GLOBAL_CONFIG.gamma << endl;
 }
 
-/**
- * =========================================================
- * SECTION 4: OPTIMIZED ROUTING ENGINE (WEIGHTED DP)
- * =========================================================
- */
 class RoutingEngineCommonDrop
 {
     int N, NODES;
@@ -317,23 +293,16 @@ class RoutingEngineCommonDrop
                 double wait = max(0.0, nodes[v].early - arrival);
                 double actual_time = arrival + wait;
 
-                // Time window hard cutoff only for truly impossible cases
                 double tw_violation = max(0.0, actual_time - nodes[v].late);
                 if (tw_violation > 1e9)
                     continue;
 
-                // -------------------------------------------------------
-                // DP transition cost:
-                // monetary cost of this leg + weighted time spent (matching hetero)
-                // -------------------------------------------------------
                 double step_money_cost = d * current_vehicle_cost_per_km;
                 double step_money_weighted = step_money_cost * GLOBAL_CONFIG.obj_cost_weight;
 
                 double time_added = travel_t + wait;
-                // Passenger time contribution: all cluster members wait during this leg
                 double step_time_weighted = time_added * cluster_size * GLOBAL_CONFIG.obj_time_weight;
 
-                // Add soft beta penalty for time window violation in this step
                 double step_tw_penalty = tw_violation * GLOBAL_CONFIG.beta;
 
                 double newWeightedCost = dp[mask][u] + step_money_weighted + step_time_weighted + step_tw_penalty;
@@ -385,8 +354,6 @@ public:
         RouteResult best_res = {INF, INF, INF, INF, INF, INF, false, INF, INF, INF};
         int finalMask = (1 << NODES) - 1;
 
-        // We need pickup times per passenger for ride-time computation.
-        // Since DP only tracks pickup order, we reconstruct them per candidate end node.
         for (int i = 1; i < NODES; i++)
         {
             if (dp[finalMask][i] >= INF)
@@ -398,11 +365,8 @@ public:
 
             double total_trip_dist = dist_state[finalMask][i] + dist_to_drop;
 
-            // ---- monetary cost = total_dist * cost_per_km  (matches hetero: total_cost) ----
             double trip_monetary_cost = total_trip_dist * v.cost_per_km;
 
-            // ---- Reconstruct pickup times from parent chain ----
-            // Walk the parent chain to recover the visit order
             vector<int> visit_order;
             {
                 int curr = i, mask = finalMask;
@@ -416,7 +380,6 @@ public:
                 reverse(visit_order.begin(), visit_order.end());
             }
 
-            // Simulate forward to get per-passenger pickup time
             vector<double> pickup_time(N, 0.0);
             {
                 double cur_t = v.available_time;
@@ -426,29 +389,21 @@ public:
                     double d = dist_lookup(prev_node, node_idx);
                     double arr = cur_t + get_travel_time(d, current_vehicle_speed);
                     double actual = max(arr, nodes[node_idx].early);
-                    pickup_time[node_idx - 1] = actual; // node_idx-1 = passenger index
+                    pickup_time[node_idx - 1] = actual;
                     cur_t = actual;
                     prev_node = node_idx;
                 }
             }
 
-            // ---- passenger_time = sum of actual ride times (drop_arrival - pickup_time[p])
-            //      This matches hetero.cpp: total_passenger_time += actual_ride_time
             double total_passenger_time = 0.0;
             for (int k = 0; k < N; k++)
             {
                 total_passenger_time += (drop_arrival - pickup_time[k]);
             }
 
-            // ---- BASE OBJECTIVE (matching hetero.cpp exactly) ----
-            // base_obj = (cost_weight * total_cost) + (time_weight * total_time)
             double weighted_score = (GLOBAL_CONFIG.obj_cost_weight * trip_monetary_cost) +
                                     (GLOBAL_CONFIG.obj_time_weight * total_passenger_time);
 
-            // ---- VIOLATION COMPUTATIONS (matching hetero.cpp) ----
-
-            // 1. Time Window Violation (beta):
-            //    drop_arrival > latest_drop + max_delay  (hetero uses buffer = max_delays[priority])
             double tw_violation = 0.0;
             for (int k = 0; k < N; k++)
             {
@@ -459,8 +414,6 @@ public:
                 tw_violation += max(0.0, lateness);
             }
 
-            // 2. Ride Time Violation (alpha):
-            //    actual_ride_time > direct_time + max_allowed_delay
             double ride_violation = 0.0;
             for (int k = 0; k < N; k++)
             {
@@ -476,16 +429,11 @@ public:
                 ride_violation += max(0.0, delay - max_delay);
             }
 
-            // 3. Capacity / Sharing Violation (gamma): matching hetero.cpp route.evaluate()
-            //    - vehicle capacity exceeded
-            //    - sharing preference exceeded (min max_sharing among onboard)
-            //    - premium preference mismatch
             double cap_violation = 0.0;
             if ((int)cluster.size() > v.capacity)
             {
                 cap_violation += (double)((int)cluster.size() - v.capacity);
             }
-            // min sharing preference across all cluster members
             int min_pref = INT_MAX;
             for (auto &p : cluster)
                 min_pref = min(min_pref, p.capacity_pref);
@@ -493,17 +441,14 @@ public:
             {
                 cap_violation += (double)((int)cluster.size() - min_pref);
             }
-            // vehicle type mismatch (premium requested but not premium vehicle)
             for (auto &p : cluster)
             {
                 if (p.pref_premium && !v.is_premium)
                 {
-                    cap_violation += 10000.0; // large penalty matching hetero
+                    cap_violation += 10000.0;
                 }
             }
 
-            // ---- PENALIZED SCORE (matching hetero.cpp formula exactly) ----
-            // objective_score = base_obj + alpha*ride_viol + beta*tw_viol + gamma*cap_viol
             double penalized_score = weighted_score + GLOBAL_CONFIG.alpha * ride_violation + GLOBAL_CONFIG.beta * tw_violation + GLOBAL_CONFIG.gamma * cap_violation;
 
             if (penalized_score < best_res.penalized_score)
@@ -517,7 +462,6 @@ public:
                 best_res.ride_time_violation = ride_violation;
                 best_res.time_window_violation = tw_violation;
                 best_res.capacity_violation = cap_violation;
-                // feasible iff all violations < 1.0  (matching hetero)
                 best_res.valid = (ride_violation < 1.0 && tw_violation < 1.0 && cap_violation < 1.0);
             }
         }
@@ -650,12 +594,6 @@ public:
     }
 };
 
-/**
- * =========================================================
- * SECTION 5: CLUSTERING HELPERS & PREFERENCE LOGIC
- * =========================================================
- */
-
 bool are_compatible_vehicle_pref(string p1, string p2)
 {
     p1 = normalize(p1);
@@ -756,12 +694,6 @@ double calculate_silhouette(const vector<vector<int>> &clusters, const vector<ve
     return count > 0 ? total_score / count : -1.0;
 }
 
-/**
- * =========================================================
- * SECTION 6: DATA LOADING
- * =========================================================
- */
-
 vector<Passenger> loadPassengers(string filename)
 {
     vector<Passenger> passengers;
@@ -788,7 +720,7 @@ vector<Passenger> loadPassengers(string filename)
         Passenger p;
         p.original_id = cols[0];
         p.sequential_id = seq_id;
-        p.id = "E" + to_string(seq_id + 1); // E1, E2, E3...
+        p.id = "E" + to_string(seq_id + 1);
         seq_id++;
 
         try
@@ -832,7 +764,7 @@ vector<Passenger> loadPassengers(string filename)
             p.d_lon = 0;
         }
         p.earliest_pickup = (double)timeToMin(cols[6]);
-        p.latest_drop = (double)timeToMin(cols[7]); // store raw; extension applied in violation check
+        p.latest_drop = (double)timeToMin(cols[7]);
 
         p.vehicle_pref = cols[8];
         string vp = normalize(p.vehicle_pref);
@@ -870,7 +802,7 @@ vector<Vehicle> loadVehicles(string filename)
         Vehicle v;
         v.original_id = cols[0];
         v.sequential_id = seq_id;
-        v.id = "V" + to_string(seq_id + 1); // V1, V2, V3...
+        v.id = "V" + to_string(seq_id + 1);
         seq_id++;
 
         try
@@ -940,11 +872,6 @@ string capitalize(const string &s)
     return result;
 }
 
-/**
- * =========================================================
- * SECTION 7: MAIN
- * =========================================================
- */
 int main(int argc, char **argv)
 {
     if (argc < 2)
@@ -981,7 +908,7 @@ int main(int argc, char **argv)
 
     N = passengers.size();
     V = vehicles.size();
-    int matrix_size = N + V + 1; // Employees + Vehicles + Office
+    int matrix_size = N + V + 1;
 
     cout << "Loading matrix from " << matrix_path << " (Expecting " << matrix_size << "x" << matrix_size << ")..." << endl;
     loadMatrix(matrix_path.string(), matrix_size);
@@ -1091,11 +1018,10 @@ int main(int argc, char **argv)
 
     RoutingEngineCommonDrop router;
 
-    // Grand totals — matching hetero.cpp printSolution accumulators
     double grand_total_dist = 0;
-    double grand_total_monetary_cost = 0;  // = sum of (dist * cost_per_km) per group
-    double grand_total_passenger_time = 0; // = sum of actual ride times
-    double grand_total_weighted_score = 0; // base objective
+    double grand_total_monetary_cost = 0;
+    double grand_total_passenger_time = 0;
+    double grand_total_weighted_score = 0;
     double grand_total_penalized_score = 0;
 
     fs::path outvehic_path = base_dir / "Clustering-Routing-DP-Solver/output_vehicle.csv";
@@ -1113,13 +1039,8 @@ int main(int argc, char **argv)
     cout << "Writing to: " << outvehic_path << endl;
     cout << "Writing to: " << outemp_path << endl;
 
-    // ---- OUTPUT FORMAT matching hetero.cpp ----
-    // vehicle CSV first line: base_objective,total_penalty
-    // (written after all groups processed so we buffer rows)
-    // employee CSV: plain header, then rows
     outFileEmp << "employee_id,pickup_time,drop_time" << endl;
 
-    // Buffer vehicle rows so we can prepend the summary line
     vector<string> veh_rows;
 
     cout << "=== CLUSTERING & ROUTE GENERATION LOG ===" << endl;
@@ -1135,7 +1056,6 @@ int main(int argc, char **argv)
             if ((int)grp.size() > vehicles[vi].capacity)
                 continue;
 
-            // Vehicle type compatibility
             bool compatible = true;
             string v_cat = normalize(vehicles[vi].category);
             for (const auto &p : grp)
@@ -1152,8 +1072,6 @@ int main(int argc, char **argv)
 
             RouteResult res = router.calculate_optimal_route(vehicles[vi], grp);
 
-            // Use penalized_score for selection (valid or not — matching hetero behavior)
-            // Wasted-seat penalty added on top
             int wasted = vehicles[vi].capacity - (int)grp.size();
             double seat_penalty = wasted * 50.0 * GLOBAL_CONFIG.obj_cost_weight;
             double final_score = res.penalized_score + seat_penalty;
@@ -1161,14 +1079,13 @@ int main(int argc, char **argv)
             if (final_score < b_res.penalized_score)
             {
                 b_res = res;
-                b_res.penalized_score = final_score; // store with seat penalty for selection
+                b_res.penalized_score = final_score;
                 b_veh = vi;
             }
         }
 
         if (b_veh != -1)
         {
-            // Restore true penalized_score (without seat penalty) for totals
             RouteResult true_res = router.calculate_optimal_route(vehicles[b_veh], grp);
 
             Vehicle &assigned_v = vehicles[b_veh];
@@ -1208,7 +1125,6 @@ int main(int argc, char **argv)
             cout << "  -> Completion: " << minToTime((int)true_res.finish_time) << endl;
             cout << "  -> Feasible: " << (true_res.valid ? "YES" : "NO") << endl;
 
-            // Update vehicle position for next group
             assigned_v.lat = grp[0].d_lat;
             assigned_v.lon = grp[0].d_lon;
             assigned_v.available_time = true_res.finish_time;
@@ -1264,7 +1180,6 @@ int main(int argc, char **argv)
         }
     }
 
-    // ---- Write vehicle CSV: first line = base_objective,total_penalty (matching hetero) ----
     double total_penalty = grand_total_penalized_score - grand_total_weighted_score;
     outFileVeh << fixed << setprecision(1) << grand_total_weighted_score << "," << total_penalty << "\n";
     outFileVeh << "vehicle_id,category,employee_id,pickup_time,drop_time" << endl;
@@ -1274,7 +1189,6 @@ int main(int argc, char **argv)
     outFileVeh.close();
     outFileEmp.close();
 
-    // ---- Final summary matching hetero.cpp printSolution ----
     cout << "\n=============================================================\n";
     cout << "                  FINAL METRICS BREAKDOWN                    \n";
     cout << "=============================================================\n";

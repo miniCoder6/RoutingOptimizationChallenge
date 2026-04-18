@@ -16,7 +16,6 @@ void DARPInstance::fit_structures(int max_id)
     if ((int)req_max_ride.size() < size)
         req_max_ride.resize(size, 0.0);
 
-    // Matrices
     if ((int)distance_matrix.size() < size)
     {
         distance_matrix.resize(size, std::vector<double>(size, std::numeric_limits<double>::infinity()));
@@ -30,7 +29,6 @@ void DARPInstance::fit_structures(int max_id)
             row.resize(size, std::numeric_limits<double>::infinity());
     }
 
-    // Scratchpads
     if ((int)pickup_times_scratch.size() < size)
         pickup_times_scratch.resize(size, -1.0);
     pickup_visited_scratch.reserve(size);
@@ -49,7 +47,7 @@ void DARPInstance::fit_structures(int max_id)
 
 void DARPInstance::set_node(int id, const Node &n)
 {
-    fit_structures(id); // Ensure vector is big enough
+    fit_structures(id);
     nodes[id] = n;
 }
 
@@ -57,14 +55,12 @@ void DARPInstance::register_request(const Request &req)
 {
     requests.push_back(req);
 
-    // Ensure lookups are big enough for the Request ID
     int max_req_id = req.id;
     if (request_to_pickup.size() <= max_req_id)
         request_to_pickup.resize(max_req_id + 1, -1);
     if (req_max_ride.size() <= max_req_id)
         req_max_ride.resize(max_req_id + 1, 0.0);
 
-    // Ensure lookups are big enough for the Node IDs
     fit_structures(std::max(req.pickup_node.id, req.delivery_node.id));
 
     node_to_request[req.pickup_node.id] = req.id;
@@ -137,7 +133,6 @@ double print_ride_times(const Solution &solution, DARPInstance &instance)
             prev_node_id = node.id;
         }
 
-        // Cleanup scratchpad
         for (int id : pickup_visited)
             pickup_times[id] = -1.0;
     }

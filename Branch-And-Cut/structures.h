@@ -35,13 +35,9 @@ struct Request
     int service_time = 0;
     int max_ride_time;
     VehicleCategory veh_pref;
-    int max_shared_with; // 0=Single, 1=Double, 2=Triple
+    int max_shared_with;
     int priority;
 
-    // UPDATED LOGIC:
-    // 1. Premium Req: Must use Premium Vehicle.
-    // 2. Normal Req: Can use Normal(Upgrade allowed).
-    // 3. Any Req: Can use anything.
     bool isVehicleCompatible(VehicleCategory v_cat) const
     {
         if (veh_pref == CATEGORY_ANY)
@@ -49,9 +45,6 @@ struct Request
 
         if (veh_pref == CATEGORY_NORMAL)
             return v_cat == CATEGORY_NORMAL;
-        // return v_cat == CATEGORY_NORMAL;
-
-        // If I asked for Premium, I strictly want Premium
         if (veh_pref == CATEGORY_PREMIUM)
             return v_cat == CATEGORY_PREMIUM;
 
@@ -93,10 +86,6 @@ struct Node
     int latest_time;
     int service_duration = 0;
 
-    // True column/row index into the distance matrix.
-    // Set once in GraphBuilder::buildNodes() by parsing original_id.
-    // Fixes correctness when CSV input is unsorted/random order:
-    // request_id/vehicle_id are just vector positions, NOT matrix indices.
     int matrix_idx = 0;
 
     std::string getMatrixId(
@@ -104,20 +93,17 @@ struct Node
         const std::vector<Vehicle> &vehs) const
     {
         if (type == PICKUP)
-            return reqs[request_id].original_id; // e.g. "E12"
+            return reqs[request_id].original_id;
 
         if (type == DELIVERY || type == DUMMY_END || type == SUPER_SINK)
             return "OFFICE";
 
         if (type == DUMMY_START)
-            return vehs[vehicle_id].original_id; // e.g. "V3"
+            return vehs[vehicle_id].original_id;
 
         return "";
     }
 
-    // Fast integer index into the distance matrix — no string allocation or parsing.
-    // Returns the pre-computed matrix_idx set by GraphBuilder, which is correct
-    // regardless of the order vehicles/employees appear in the input CSV.
     inline int getMatrixIndex() const
     {
         return matrix_idx;
@@ -145,14 +131,6 @@ struct Node
 
     Coords getCoords(const std::vector<Request> &reqs, const std::vector<Vehicle> &vehs) const
     {
-        // if (type == PICKUP)
-        //     return reqs[request_id].pickup_loc;
-        // if (type == DELIVERY)
-        //     return reqs[request_id].drop_loc;
-        // if (type == DUMMY_START || type == DUMMY_END)
-        //     return vehs[vehicle_id].start_loc;
-        // return {0.0, 0.0};
-
         if (type == PICKUP)
             return reqs[request_id].pickup_loc;
 
@@ -166,11 +144,10 @@ struct Node
         {
             if (!reqs.empty())
             {
-                return reqs[0].drop_loc; // End at the office/factory
+                return reqs[0].drop_loc;
             }
-            return vehs[vehicle_id].start_loc; // Fallback
+            return vehs[vehicle_id].start_loc;
         }
-        // --- CHANGE ENDS HERE ---
 
         return {0.0, 0.0};
     }

@@ -1,10 +1,6 @@
 #include "model.h"
 #include "params.h"
 
-/*
- * Node Implementation
- */
-
 Node::Node()
     : id(-1), type(NodeType::DEPOT), lat(0.0), lon(0.0),
       e(0.0), l(0.0), st(0.0),
@@ -38,9 +34,6 @@ std::string Node::repr()
     return ("Node(" + std::to_string(id) + ", " + type_str + ")");
 }
 
-/*
- * Vehicle Implementation
- */
 Vehicle::Vehicle(int vehicle_id, int depot_node_id, int capacity,
                  double fixed_cost, double unit_length_cost, double unit_time_cost,
                  double max_dist_fixed, double cost_per_employee, int vehicle_type_id, double average_speed_kmph)
@@ -53,9 +46,6 @@ std::string Vehicle::repr()
     return ("Vehicle(" + std::to_string(id) + ", Cap: " + std::to_string(capacity) + ")");
 }
 
-/*
- * Request Implementation
- */
 Request::Request(int request_id, const Node &pickup_node, const Node &delivery_node,
                  double max_ride_time, uint32_t compatible_vehicle_types)
     : id(request_id),
@@ -64,9 +54,6 @@ Request::Request(int request_id, const Node &pickup_node, const Node &delivery_n
       max_ride_time(max_ride_time),
       compatible_vehicle_types(compatible_vehicle_types) {}
 
-/*
- * Route Implementation
- */
 Route::Route(const Vehicle *vehicle) : vehicle(vehicle)
 {
     stats_valid = false;
@@ -77,9 +64,6 @@ std::string Route::repr()
     return ("Route(Vehicle " + std::to_string(vehicle->id) + ", Stops: " + std::to_string(sequence.size()) + ")");
 }
 
-/*
- * Solution Implementation
- */
 Solution::Solution() : f1(0), f2(0), f3(0), alpha(Params::ALPHA), beta(Params::BETA), gamma(Params::GAMMA) {}
 Solution::Solution(const std::vector<Route> &routes, const std::vector<int> &unassigned_requests)
     : routes(routes), unassigned_requests(unassigned_requests),
@@ -93,8 +77,6 @@ double Solution::total_cost()
 
 Solution Solution::deep_copy() const
 {
-    // The default copy constructor will copy:
-    // - All primitive members
-    // - All STL containers and their contents (Route, Vehicle, etc.)
+
     return Solution(*this);
 }

@@ -1,0 +1,12 @@
+key,value
+test_case_id,TC_03
+city,Bengaluru
+distance_method,haversine
+allow_external_maps,TRUE
+priority_1_max_delay_min,5
+priority_2_max_delay_min,8
+priority_3_max_delay_min,12
+priority_4_max_delay_min,18
+priority_5_max_delay_min,30
+objective_cost_weight,0.6
+objective_time_weight,0.4

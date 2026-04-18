@@ -1,3 +1,4 @@
+
 #include "CostFunction.h"
 #include "Distance.h"
 
@@ -155,5 +156,3 @@ double routeCost(const Route& r, const Vehicle& v, const std::vector<Employee>& 
     r.isDirty = false;
     return r.cachedCost;
 }
-
-

@@ -12,8 +12,12 @@
 
 int timeStringToMin(std::string timeStr)
 {
-    int h = std::stoi(timeStr.substr(0, 2));
-    int m = std::stoi(timeStr.substr(3, 2));
+    size_t colonPos = timeStr.find(':');
+    if (colonPos == std::string::npos)
+        return 0;
+
+    int h = std::stoi(timeStr.substr(0, colonPos));
+    int m = std::stoi(timeStr.substr(colonPos + 1));
     return h * 60 + m;
 }
 
@@ -35,8 +39,6 @@ int getTravelTime(Coords a, Coords b, double speed_kmh)
 {
     double dist = getDistance(a, b);
 
-    // FIXED: Handle floating point jitter.
-    // If distance is less than 5 meters, assume 0 time.
     if (dist < 0.005)
         return 0;
 
@@ -45,7 +47,7 @@ int getTravelTime(Coords a, Coords b, double speed_kmh)
 
 std::string minToTimeStr(int minutes)
 {
-    int h = (minutes / 60) % 24;
+    int h = (minutes / 60);
     int m = minutes % 60;
     std::ostringstream oss;
     oss << std::setw(2) << std::setfill('0') << h << ":"
@@ -84,10 +86,6 @@ Request createRequest(
         r.veh_pref = CATEGORY_ANY;
     }
 
-    // FIXED: Mapping strings to correct integer logic
-    // Single = 0 extra people (Total 1)
-    // Double = 1 extra person (Total 2)
-    // Triple = 2 extra people (Total 3)
     if (s_pref == "single")
         r.max_shared_with = 0;
     else if (s_pref == "double")
@@ -95,18 +93,8 @@ Request createRequest(
     else
         r.max_shared_with = 2;
 
-    // double est_direct_dist = getDistanceFromMatrix(r.original_id, "OFFICE");
-
-    // // Safe check for direct time
-    // int direct_time = 0;
-    // if (est_direct_dist > 0.005)
-    // {
-    //     direct_time = std::ceil((est_direct_dist / 30.0) * 60.0);
-    // }
-
     int allowed_delay = priority_delays.at(priority);
 
-    // r.max_ride_time = direct_time + allowed_delay;
     r.latest_drop += allowed_delay;
     if (r.latest_drop - r.earliest_pickup < 0)
         r.latest_drop += 1440;
@@ -114,37 +102,3 @@ Request createRequest(
 
     return r;
 }
-
-// std::vector<InitialTrip> loadInitialSolutionCSV(const std::string &filename)
-// {
-//     std::ifstream file(filename);
-//     if (!file.is_open())
-//     {
-//         std::cerr << "Could not open initial solution file\n";
-//         exit(1);
-//     }
-
-//     std::vector<InitialTrip> trips;
-//     std::string line;
-//     std::getline(file, line); // header
-
-//     while (std::getline(file, line))
-//     {
-//         if (!line.empty() && line.back() == '\r')
-//             line.pop_back();
-
-//         std::stringstream ss(line);
-//         std::string token;
-//         std::vector<std::string> row;
-
-//         while (std::getline(ss, token, ','))
-//             row.push_back(token);
-
-//         if (row.size() < 3)
-//             continue;
-
-//         trips.push_back({row[0], row[2]});
-//     }
-
-//     return trips;
-// }

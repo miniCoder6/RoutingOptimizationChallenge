@@ -44,10 +44,8 @@ bool FeasibilityChecker::runEightStepEvaluation(const std::vector<int> &route_id
 
     std::vector<int> active_requests;
 
-    // Track sharing violations so we only penalize once per passenger per route evaluation
     std::vector<bool> sharing_penalized(requests.size(), false);
 
-    // Forward Pass
     for (int i = 1; i < U; ++i)
     {
         int prev = route_ids[i - 1];
@@ -67,7 +65,6 @@ bool FeasibilityChecker::runEightStepEvaluation(const std::vector<int> &route_id
         W[i] = std::max(0, n_curr.earliest_time - A[i]);
         int B_i = A[i] + W[i];
 
-        // --- CONSTRAINT 1: Time Windows (SOFT) ---
         if (B_i > n_curr.latest_time)
         {
             if (mode == EvaluationMode::STRICT)
@@ -84,9 +81,6 @@ bool FeasibilityChecker::runEightStepEvaluation(const std::vector<int> &route_id
         D[i] = B_i + n_curr.service_duration;
         L[i] = L[i - 1] + n_curr.demand;
 
-        // --- CONSTRAINT 2: Physical Vehicle Capacity (STRICT) ---
-        // This will ALWAYS reject the route if capacity is exceeded,
-        // even if we are in PENALTY mode.
         if (L[i] > max_global_capacity)
         {
             return false;
@@ -96,7 +90,6 @@ bool FeasibilityChecker::runEightStepEvaluation(const std::vector<int> &route_id
         {
             const Request &r = requests[n_curr.request_id];
 
-            // --- CONSTRAINT 3: Vehicle Compatibility (SOFT) ---
             if (!r.isVehicleCompatible(vehicle.category))
             {
                 if (mode == EvaluationMode::STRICT)
@@ -116,11 +109,9 @@ bool FeasibilityChecker::runEightStepEvaluation(const std::vector<int> &route_id
             active_requests.erase(it, active_requests.end());
         }
 
-        // Calculate real load for sharing preference evaluation
         int dummy_load = max_global_capacity - vehicle.max_capacity;
         int current_real_load = L[i] - dummy_load;
 
-        // --- CONSTRAINT 4: Ride-Sharing Preferences (SOFT) ---
         for (int req_id : active_requests)
         {
             const Request &r = requests[req_id];
@@ -144,7 +135,6 @@ bool FeasibilityChecker::runEightStepEvaluation(const std::vector<int> &route_id
         }
     }
 
-    // Forward Time Slack (Kept for local reference/other operators)
     std::vector<int> F(U);
     F[U - 1] = nodes[route_ids[U - 1]].latest_time - A[U - 1];
     for (int i = U - 2; i >= 0; --i)
@@ -153,5 +143,5 @@ bool FeasibilityChecker::runEightStepEvaluation(const std::vector<int> &route_id
         F[i] = std::min(n_curr.latest_time - (A[i] + W[i]), F[i + 1] + W[i + 1]);
     }
 
-    return true; // We survived all strict constraints!
+    return true;
 }

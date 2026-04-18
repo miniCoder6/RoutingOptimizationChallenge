@@ -1,37 +1,79 @@
-# What's changed?
-earlier the files recieved from frontend was being saved at project root dir with a fixed filename, so if we send multiple request at same time it would cause error. fixed it by creating a temp directory with a uuid for each requests and saving its data in that folder which cleans up automatically when process ends. also instead of passing 4 args to each executable. now we send only one which is the path of the temp dir for that request. and we can get files from there as they have predefined file name. For eg..
+# KRITI-Optimization API Backend
 
-tmp/req_1234/ \
-employees.csv \
-vehichles.csv \
-metadata.csv \
-matrix.txt 
+A high-performance, multithreaded C++ backend designed to orchestrate complex vehicle routing and employee transportation solvers. Built using the [Crow](https://crowcpp.org/) framework, this server processes batch coordinates, computes highly concurrent distance matrices using OSRM, and executes various included optimization algorithms (ALNS, Branch-and-Cut, Memetic, etc.) in isolated sandbox environments.
 
-- Also now the output for each request created by different algos are being saved in the temp dir for that request only. i have made the required changes to ALNS, CRDP, and HDARP. instead of saving the output to their own directory they create and save them in temp directory. same goes for log files
+## System Architecture
 
-- the other 2 algos still need work, so they remain.
-
-- go through the changes and check if some work is needed. *make sure to remove the warnings in the algo which are raised when the argc<4, and adjust other stuff like that*
+The server operates as a central dispatcher with a 3-step pipeline for every incoming request:
+1. **Data Ingestion & Sandboxing:** Parses multipart CSV data (Employees, Vehicles, Metadata) and creates an isolated, UUID-tagged temporary workspace to prevent data races between concurrent API requests.
+2. **Matrix Generation:** Computes a full N x N distance matrix between all nodes (employees, vehicles, and depot) using either a highly parallelized OSRM network fetch or a Haversine fallback.
+3. **Algorithm Orchestration:** Dispatches the data to the integrated C++ solver binaries, running them concurrently across multiple threads, and aggregates their CSV outputs into a unified JSON response.
 
 
 
+## Deep Dive: Calculations & Matrix Generation
 
-# Steps to build and run the server:
-- first clone the repo
-- run make command in the repo directory
-- it may show error regarding asio.h, it is because we are passing flags to use standalone asio source instead of boost lib
-- fix it by running: sudo apt install libasio-dev
-- after the build is completed successfully
-- run the server_app executable
-- the API will be live on port 5555 on your local network
-# Testing the API
-- we gonna test it with curl, we can send request via any other method too
-- make sure the 3 files ( employees.csv, vehicles.csv, metadata.csv ) are present in your working directory
-- NOTE: our api is handling the POST request at localhost:5555/upload
-- run the curl command
-- curl -X POST http://localhost:5555/upload   -F "employees=@employees.csv"   -F "vehicles=@vehicles.csv"   -F "metadata=@metadata.csv"
-- u should get the response (if not then leave it)
-- the logs will be printed in the server terminal
-- respective logs for each algo will be saved in their respective directories
+The core geographic logic is handled by the `generate_matrix_file` function, which determines the cost (distance) between any two points in the dataset.
 
-# NOTE: this is not the final API, there are some issues which can be fixed
+### 1. OSRM Road Network Distances (Primary)
+To get accurate real-world driving distances, the system queries a public OSRM routing engine. Because OSRM limits the number of coordinates per request (typically 100), the system implements a **Block Partitioning Algorithm**:
+* The N coordinates are sliced into blocks of 99.
+* The system constructs sub-matrices (e.g., Block 0 to Block 1, Block 0 to Block 2).
+* Distances are returned in meters and normalized to kilometers.
+
+### 2. Haversine Formula (Fallback / Offline Mode)
+If the metadata specifies `allow_external_maps,FALSE`, or if the OSRM network request fails, the system automatically falls back to calculating the Great-Circle distance using the Haversine formula. 
+* Converts latitude and longitude from degrees to radians.
+* Applies the spherical distance formula using Earth's mean radius (R ≈ 6371.0 km).
+
+## Deep Dive: Concurrency & Multithreading
+
+This system leverages modern C++ `<thread>`, `<atomic>`, and `<mutex>` libraries to drastically reduce response times for heavy computational loads.
+
+### Concurrent Matrix Fetching
+Network I/O is the biggest bottleneck in generating large distance matrices. Instead of fetching block permutations sequentially:
+* The backend spawns a `std::thread` for every `(srcBlock, dstBlock)` combination.
+* A batch of `curl` requests is fired simultaneously.
+* An `std::atomic<bool> osrm_failed` flag is monitored. If network errors occur, the threads are cleanly joined, and the system re-launches the thread pool entirely in Haversine mode.
+
+### Parallel Solver Execution
+Route optimization algorithms are notoriously CPU-intensive. The backend executes multiple heuristics in parallel:
+* **Sandboxed Execution:** Each algorithm is executed in its own dedicated subdirectory within the request's temp folder.
+* **Thread Dispatch:** A thread pool is spun up for `ALNS`, `Branch-And-Cut`, `Heterogeneous_DARP`, and `god` solvers. 
+* **Thread Safety:** Standard output logging (`std::cout`) across the concurrent algorithm runners is protected by a global `std::mutex log_mutex` to prevent interleaved terminal output.
+* **Sequential Processing (Solution Seeding):** The `Memetic` algorithm is executed after the parallel block joins. Rather than running from scratch, it ingests the completed outputs from the preceding algorithms as its initial population, applying evolutionary techniques to further refine and optimize the final routes.
+
+---
+
+## Getting Started: How to Run
+
+### 1. Starting the Backend (C++ API)
+Ensure you have the required C++ build tools installed. Open your terminal, navigate to the backend directory, and compile the server:
+
+```bash
+make
+./server_app
+```
+*The server will initialize and begin listening for incoming connections (default: port 5555).*
+
+#### Once the backend is running, you can test the system using either Option A (Terminal) or Option B (Frontend UI):
+
+### 2. Option A: Testing the API via Terminal
+To test the backend directly without a UI, open a new terminal window and submit a test job using curl. Ensure your CSV files are in your current working directory:
+
+```bash
+curl -X POST http://localhost:5555/upload \
+  -F "employees=@employees.csv" \
+  -F "vehicles=@vehicles.csv" \
+  -F "metadata=@metadata.csv" \
+  -F "optimizationLevel=10"
+```
+*Note: Successful execution will generate the optimized route outputs and save them into a newly created tmp/ folder within your backend directory.*
+
+### 3. Option B: Starting the Frontend (UI)
+To run the web application interface and test visually, open a new terminal window, navigate to your frontend directory, and run:
+```bash
+npm install
+npm run dev
+```
+Once the development server starts, open the provided localhost URL in your web browser. From the UI, you can easily upload your Excel and CSV files to test the system and view the outputs visually.

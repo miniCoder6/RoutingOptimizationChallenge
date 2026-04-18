@@ -17,8 +17,14 @@ int main(int argc, char *argv[])
     std::string employee_file = base + "/employees.csv";
     std::string matrix_file = base + "/matrix.txt";
     std::string metadata_file = base + "/metadata.csv";
+    std::string max_iter_file = base + "/mode.txt";
 
-    long long max_iterations = (argc > 5) ? std::atoll(argv[5]) : Params::DEFAULT_MAX_ITERATIONS;
+    long long max_iterations = Params::DEFAULT_MAX_ITERATIONS;
+    long long runtime_limit_seconds = read_runtime_limit(max_iter_file);
+
+    std::cout << "Max iterations: " << max_iterations << "\n";
+    std::cout << "Runtime limit: " << runtime_limit_seconds << "s\n";
+
     int h = (argc > 6) ? std::atoi(argv[6]) : Params::DEFAULT_H;
 
     auto start = std::chrono::high_resolution_clock::now();
@@ -29,7 +35,6 @@ int main(int argc, char *argv[])
 
     int num_vehicles = read_vehicle_data(vehicle_file, instance);
 
-    // Pre-count employees to compute offsets before assigning IDs
     int num_employees_expected = count_csv_data_rows(employee_file);
     int pickup_offset = num_vehicles;
     int delivery_offset = num_vehicles + num_employees_expected;
@@ -37,18 +42,20 @@ int main(int argc, char *argv[])
     int num_employees = read_employee_data(employee_file, instance,
                                            pickup_offset, delivery_offset);
 
-    // Load and remap the matrix to VNS node ID space
     loadMatrix(matrix_file, instance, num_employees, num_vehicles,
                pickup_offset, delivery_offset);
 
     std::cout << "Loaded " << num_vehicles << " vehicles, "
               << num_employees << " employees.\n";
-    std::cout << "Running VNS (max_iter=" << max_iterations << ", h=" << h << ")...\n";
+    std::cout << "Running VNS (max_iter=" << max_iterations << ", runtime_limit=" << runtime_limit_seconds << "s, h=" << h << ")...\n";
+
+    auto current_time = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> elapsed = current_time - start;
+    double remaining_time = (double)runtime_limit_seconds - elapsed.count() - 0.2;
 
     Solution initial_sol = initial_solution(instance);
-    Solution best = vns1(initial_sol, instance, max_iterations, h);
+    Solution best = vns1(initial_sol, instance, max_iterations, h, remaining_time);
 
-    // --- Output ---
     std::cout << std::fixed << std::setprecision(2);
     std::cout << "\n=== Final Solution ===\n";
     std::cout << "Total Objective Cost: " << best.total_cost() << "\n";
@@ -99,7 +106,7 @@ int main(int argc, char *argv[])
     std::cout << "Total duration:   " << total_duration << "\n";
     std::cout << "Objective cost:   " << objective_cost << "\n";
 
-    write_output_csvs(best, instance, base);
+    write_output_csvs(best, instance, base, objective_cost);
 
     auto end = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> duration = end - start;

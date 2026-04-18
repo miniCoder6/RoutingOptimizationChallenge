@@ -63,7 +63,7 @@ void calculate_route_stats(Route &route, DARPInstance &instance)
 
     const Node *first_node = &instance.nodes[route.sequence.front()];
     double dist_to_first = instance.get_dist(prev_node_id, first_node->id);
-    double start_time = std::max(prev_node->e, first_node->e - (dist_to_first / speed) * 60.0); // Convert hours to minutes
+    double start_time = std::max(prev_node->e, first_node->e - (dist_to_first / speed) * 60.0);
 
     current_time = start_time;
 
@@ -72,7 +72,7 @@ void calculate_route_stats(Route &route, DARPInstance &instance)
         const Node &node = instance.nodes[node_id];
 
         double dist = instance.get_dist(prev_node_id, node.id);
-        double travel_time = (dist / speed) * 60.0; // Convert hours to minutes
+        double travel_time = (dist / speed) * 60.0;
 
         total_distance += dist;
         double arrival_time = current_time + prev_node->st + travel_time;
@@ -89,7 +89,6 @@ void calculate_route_stats(Route &route, DARPInstance &instance)
             }
         }
 
-        // Employee Quality Logic
         double wp_i = 0.0;
         if (node.type == NodeType::PICKUP && arrival_time > node.e)
             wp_i = arrival_time - node.e;
@@ -97,7 +96,6 @@ void calculate_route_stats(Route &route, DARPInstance &instance)
             wp_i = node.l - arrival_time;
         employee_quality_sq += (wp_i * node.priority);
 
-        // Load & TW Logic
         load += node.load;
         if (node.load > 0)
             sp_count[node.sharing_preference]++;
@@ -117,7 +115,6 @@ void calculate_route_stats(Route &route, DARPInstance &instance)
         if (start_service_time > node.l)
             viol_tw += (start_service_time - node.l) * node.priority;
 
-        // Ride time logic
         if (node.type == NodeType::PICKUP)
         {
             pickup_times[node.id] = start_service_time;
@@ -140,11 +137,9 @@ void calculate_route_stats(Route &route, DARPInstance &instance)
         prev_node_id = node.id;
     }
 
-    // Cleanup scratchpad
     for (int id : pickup_visited)
         pickup_times[id] = -1.0;
 
-    // Finalizing Logic for Return to Depot
     double dist_to_depot = instance.get_dist(prev_node_id, vehicle.depot_id);
 
     double cost_distance = total_distance;
@@ -152,7 +147,6 @@ void calculate_route_stats(Route &route, DARPInstance &instance)
 
     total_distance += dist_to_depot;
 
-    // Cost Calculations
     double cost_dist = 0.0;
     if (cost_distance <= vehicle.L)
     {
@@ -285,6 +279,7 @@ std::pair<double, std::vector<int>> insert_request_best_position(
     const Node &delivery_node = instance.nodes[delivery_id];
 
     const int n_p = (n + 2) / 2;
+
     const double cost_employee_total = (n_p > 1) ? vehicle.cp * (n_p - 1) : 0.0;
 
     struct EvalState
@@ -302,95 +297,11 @@ std::pair<double, std::vector<int>> insert_request_best_position(
         double prev_st;
     };
 
-    // Static to avoid heap allocation/deallocation per call (single-threaded)
-    static std::vector<EvalState> prefix;
-    prefix.resize(n);
-    double orig_start_time = 0.0;
-
-    std::vector<double> &pickup_svc = instance.pickup_times_scratch;
-    std::vector<int> &pickup_cleanup = instance.pickup_visited_scratch;
-    pickup_cleanup.clear();
-
-    if (n > 0)
-    {
-        const int first_id = route.sequence[0];
-        const double dist_to_first = instance.get_dist(depot_id, first_id);
-        orig_start_time = std::max(depot_node.e, instance.nodes[first_id].e - ((dist_to_first / speed) * 60.0));
-
-        EvalState st{orig_start_time, 0, {0, 0, 0, 0}, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, depot_id, depot_node.st};
-
-        for (int k = 0; k < n; ++k)
-        {
-            const int nid = route.sequence[k];
-            const Node &nd = instance.nodes[nid];
-            const double dist = instance.get_dist(st.prev_id, nid);
-            st.total_dist += dist;
-            const double arrival = st.cur_time + st.prev_st + (dist / speed) * 60.0; // Convert hours to minutes
-            const double start_svc = std::max(nd.e, arrival);
-            const double wait = start_svc - arrival;
-
-            if ((nd.type == NodeType::DELIVERY || nd.type == NodeType::PICKUP) &&
-                nd.waiting_tariff != '\0')
-                st.cost_waiting += get_waiting_cost(wait, nd.waiting_tariff, instance);
-
-            double wp = 0.0;
-            if (nd.type == NodeType::PICKUP && arrival > nd.e)
-                wp = arrival - nd.e;
-            else if (nd.type == NodeType::DELIVERY && arrival < nd.l)
-                wp = nd.l - arrival;
-            st.employee_q += wp * nd.priority;
-
-            st.load += nd.load;
-            if (nd.load > 0)
-                st.sp_count[nd.sharing_preference]++;
-            else if (nd.load < 0)
-                st.sp_count[nd.sharing_preference]--;
-            {
-                int eff_cap = vehicle.capacity;
-                for (int sp = 1; sp <= 3; ++sp)
-                {
-                    if (st.sp_count[sp] > 0)
-                    {
-                        eff_cap = std::min(eff_cap, sp);
-                        break;
-                    }
-                }
-                if (st.load > eff_cap)
-                    st.viol_cap += (st.load - eff_cap);
-            }
-            if (start_svc > nd.l)
-                st.viol_tw += (start_svc - nd.l) * nd.priority;
-
-            if (nd.type == NodeType::PICKUP)
-            {
-                pickup_svc[nid] = start_svc;
-                pickup_cleanup.push_back(nid);
-            }
-            else if (nd.type == NodeType::DELIVERY)
-            {
-                const int rid = instance.get_req_id_by_node(nid);
-                const int pid = instance.get_pickup_node_by_req(rid);
-                if (pickup_svc[pid] != -1.0)
-                {
-                    const double ride = start_svc - (pickup_svc[pid] + instance.nodes[pid].st);
-                    const double max_r = instance.get_max_ride_time_by_req(rid);
-                    if (ride > max_r)
-                        st.viol_ride += (ride - max_r);
-                }
-            }
-
-            st.cur_time = start_svc;
-            st.prev_id = nid;
-            st.prev_st = nd.st;
-            prefix[k] = st;
-        }
-    }
-
     auto process_node = [&](EvalState &s, int node_id, const Node &node) -> double
     {
         const double dist = instance.get_dist(s.prev_id, node_id);
         s.total_dist += dist;
-        const double arrival = s.cur_time + s.prev_st + (dist / speed) * 60.0; // Convert hours to minutes
+        const double arrival = s.cur_time + s.prev_st + (dist / speed) * 60.0;
         const double start_svc = std::max(node.e, arrival);
         const double wait = start_svc - arrival;
 
@@ -410,19 +321,19 @@ std::pair<double, std::vector<int>> insert_request_best_position(
             s.sp_count[node.sharing_preference]++;
         else if (node.load < 0)
             s.sp_count[node.sharing_preference]--;
+
+        int eff_cap = vehicle.capacity;
+        for (int k = 1; k <= 3; ++k)
         {
-            int eff_cap = vehicle.capacity;
-            for (int k = 1; k <= 3; ++k)
+            if (s.sp_count[k] > 0)
             {
-                if (s.sp_count[k] > 0)
-                {
-                    eff_cap = std::min(eff_cap, k);
-                    break;
-                }
+                eff_cap = std::min(eff_cap, k);
+                break;
             }
-            if (s.load > eff_cap)
-                s.viol_cap += (s.load - eff_cap);
         }
+        if (s.load > eff_cap)
+            s.viol_cap += (s.load - eff_cap);
+
         if (start_svc > node.l)
             s.viol_tw += (start_svc - node.l) * node.priority;
 
@@ -432,147 +343,261 @@ std::pair<double, std::vector<int>> insert_request_best_position(
         return start_svc;
     };
 
-    static std::vector<std::pair<int, double>> mid_pickup_saves;
-    static std::vector<std::pair<int, double>> suf_pickup_saves;
-    mid_pickup_saves.clear();
-    suf_pickup_saves.clear();
+    std::vector<double> &pickup_svc = instance.pickup_times_scratch;
+    std::vector<int> &pickup_cleanup = instance.pickup_visited_scratch;
+    pickup_cleanup.clear();
+
+    static std::vector<EvalState> base_prefix;
+    if ((int)base_prefix.size() < n + 1)
+        base_prefix.resize(n + 1);
+
+    double orig_start_time = 0.0;
+    if (n > 0)
+    {
+        const int first = route.sequence[0];
+        const double d = instance.get_dist(depot_id, first);
+        orig_start_time = std::max(depot_node.e, instance.nodes[first].e - (d / speed) * 60.0);
+
+        EvalState st{orig_start_time, 0, {0, 0, 0, 0}, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, depot_id, depot_node.st};
+        for (int k = 0; k < n; ++k)
+        {
+            const int nid = route.sequence[k];
+            const Node &nd = instance.nodes[nid];
+            double svc = process_node(st, nid, nd);
+            if (nd.type == NodeType::PICKUP)
+            {
+                pickup_svc[nid] = svc;
+                pickup_cleanup.push_back(nid);
+            }
+            base_prefix[k] = st;
+        }
+    }
+
+    static std::vector<std::pair<int, double>> pickup_restores;
 
     for (int i = 0; i <= n; ++i)
     {
-        EvalState base;
-        double start_time;
 
+        static std::vector<EvalState> ref_traj;
+        static std::vector<double> ref_cap_adj;
+        if ((int)ref_traj.size() < n + 2)
+            ref_traj.resize(n + 2);
+        if ((int)ref_cap_adj.size() < n + 2)
+            ref_cap_adj.resize(n + 2);
+
+        EvalState st;
         if (i == 0)
         {
-            const double dist_to_pickup = instance.get_dist(depot_id, pickup_id);
-            start_time = std::max(depot_node.e, pickup_node.e - (dist_to_pickup / speed) * 60.0); // Convert hours to minutes
-            base = {start_time, 0, {0, 0, 0, 0}, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, depot_id, depot_node.st};
+            const double d_to_p = instance.get_dist(depot_id, pickup_id);
+            double st_time = std::max(depot_node.e, pickup_node.e - (d_to_p / speed) * 60.0);
+            st = {st_time, 0, {0, 0, 0, 0}, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, depot_id, depot_node.st};
         }
         else
         {
-            start_time = orig_start_time;
-            base = prefix[i - 1];
+            st = base_prefix[i - 1];
         }
 
-        EvalState after_pickup = base;
-        const double pickup_start_svc = process_node(after_pickup, pickup_id, pickup_node);
+        double p_start_svc = process_node(st, pickup_id, pickup_node);
 
-        const double saved_new_pickup = pickup_svc[pickup_id];
-        pickup_svc[pickup_id] = pickup_start_svc;
+        double saved_p_svc = pickup_svc[pickup_id];
+        pickup_svc[pickup_id] = p_start_svc;
 
-        mid_pickup_saves.clear();
+        ref_traj[i] = st;
 
-        EvalState mid = after_pickup;
+        bool possible = true;
+        for (int k = i; k < n; ++k)
+        {
+            int nid = route.sequence[k];
+            const Node &nd = instance.nodes[nid];
+            double svc = process_node(st, nid, nd);
+
+            pickup_restores.push_back({nid, pickup_svc[nid]});
+            if (nd.type == NodeType::PICKUP)
+            {
+                pickup_svc[nid] = svc;
+            }
+            else if (nd.type == NodeType::DELIVERY)
+            {
+                int rid = instance.get_req_id_by_node(nid);
+                int pid = instance.get_pickup_node_by_req(rid);
+                if (pickup_svc[pid] != -1.0)
+                {
+                    double ride = svc - (pickup_svc[pid] + instance.nodes[pid].st);
+                    double max_r = instance.get_max_ride_time_by_req(rid);
+                    if (ride > max_r)
+                        st.viol_ride += (ride - max_r);
+                }
+            }
+            ref_traj[k + 1] = st;
+        }
+
+        double acc_cap_adj = 0.0;
+        int p_pref = request.pickup_node.sharing_preference;
+
+        for (int k = n; k > i; --k)
+        {
+            EvalState &s = ref_traj[k];
+
+            int mod_load = s.load - 1;
+            int mod_sp[4] = {s.sp_count[0], s.sp_count[1], s.sp_count[2], s.sp_count[3]};
+            mod_sp[p_pref]--;
+
+            double mod_viol = 0.0;
+            int eff_cap = vehicle.capacity;
+            for (int m = 1; m <= 3; ++m)
+            {
+                if (mod_sp[m] > 0)
+                {
+                    eff_cap = std::min(eff_cap, m);
+                    break;
+                }
+            }
+            if (mod_load > eff_cap)
+                mod_viol = (mod_load - eff_cap);
+
+            double delta = mod_viol - s.viol_cap;
+
+            double prev_viol = ref_traj[k - 1].viol_cap;
+            double local_viol = s.viol_cap - prev_viol;
+
+            acc_cap_adj += (mod_viol - local_viol);
+            ref_cap_adj[k] = acc_cap_adj;
+        }
 
         for (int j = i + 1; j <= n + 1; ++j)
         {
-            if (j > i + 1)
-            {
-                const int mid_id = route.sequence[j - 2];
-                const Node &mid_node = instance.nodes[mid_id];
-                const double mid_svc = process_node(mid, mid_id, mid_node);
+            EvalState st_j = ref_traj[j - 1];
 
-                if (mid_node.type == NodeType::PICKUP)
+            double d_start_svc = process_node(st_j, delivery_id, delivery_node);
+
+            {
+                double ride = d_start_svc - (p_start_svc + pickup_node.st);
+                if (ride > request.max_ride_time)
+                    st_j.viol_ride += (ride - request.max_ride_time);
+            }
+
+            if (j == n + 1)
+            {
+                double dist_to_depot = instance.get_dist(st_j.prev_id, depot_id);
+                double total_dist = st_j.total_dist + dist_to_depot;
+
+                double cost_dist = (total_dist <= vehicle.L) ? vehicle.lambda_k : (vehicle.lambda_k + vehicle.c_k * (total_dist - vehicle.L));
+                double cost_dur = vehicle.ct_k * ((st_j.cur_time + st_j.prev_st) - orig_start_time);
+
+                double f1 = cost_dist + cost_dur + cost_employee_total + st_j.cost_waiting;
+                double f2 = st_j.employee_q;
+                double cost = f1 + Params::F2_WEIGHT * f2 + alpha * st_j.viol_ride + beta * st_j.viol_tw + gamma * st_j.viol_cap;
+
+                if (cost < best_cost)
                 {
-                    mid_pickup_saves.push_back({mid_id, pickup_svc[mid_id]});
-                    pickup_svc[mid_id] = mid_svc;
+                    best_cost = cost;
+                    best_i = i;
+                    best_j = j;
                 }
-                else if (mid_node.type == NodeType::DELIVERY)
+            }
+            else
+            {
+
+                int next_nid = route.sequence[j - 1];
+                double dist_d_next = instance.get_dist(delivery_id, next_nid);
+                double arrival_at_next = st_j.cur_time + delivery_node.st + (dist_d_next / speed) * 60.0;
+
+                EvalState st_next = st_j;
+                double next_start_svc = process_node(st_next, next_nid, instance.nodes[next_nid]);
+
+                if (std::abs(next_start_svc - ref_traj[j].cur_time) < 1e-4)
                 {
-                    const int rid = instance.get_req_id_by_node(mid_id);
-                    const int pid = instance.get_pickup_node_by_req(rid);
-                    if (pickup_svc[pid] != -1.0)
+
+                    EvalState &ref_end = ref_traj[n];
+                    EvalState &ref_curr = ref_traj[j];
+
+                    st_next.total_dist += (ref_end.total_dist - ref_curr.total_dist);
+                    st_next.cost_waiting += (ref_end.cost_waiting - ref_curr.cost_waiting);
+                    st_next.employee_q += (ref_end.employee_q - ref_curr.employee_q);
+                    st_next.viol_tw += (ref_end.viol_tw - ref_curr.viol_tw);
+                    st_next.viol_ride += (ref_end.viol_ride - ref_curr.viol_ride);
+
+                    double cap_base_diff = (ref_end.viol_cap - ref_curr.viol_cap);
+                    double cap_adj = ref_cap_adj[j + 1];
+
+                    st_next.viol_cap += (cap_base_diff + cap_adj);
+
+                    st_next.prev_id = ref_end.prev_id;
+                    st_next.prev_st = ref_end.prev_st;
+                    st_next.cur_time = ref_end.cur_time;
+
+                    double dist_to_depot = instance.get_dist(st_next.prev_id, depot_id);
+                    double total_dist = st_next.total_dist + dist_to_depot;
+                    double cost_dist = (total_dist <= vehicle.L) ? vehicle.lambda_k : (vehicle.lambda_k + vehicle.c_k * (total_dist - vehicle.L));
+                    double cost_dur = vehicle.ct_k * ((st_next.cur_time + st_next.prev_st) - orig_start_time);
+
+                    double f1 = cost_dist + cost_dur + cost_employee_total + st_next.cost_waiting;
+                    double f2 = st_next.employee_q;
+                    double cost = f1 + Params::F2_WEIGHT * f2 + alpha * st_next.viol_ride + beta * st_next.viol_tw + gamma * st_next.viol_cap;
+
+                    if (cost < best_cost)
                     {
-                        const double ride = mid_svc - (pickup_svc[pid] + instance.nodes[pid].st);
-                        const double max_r = instance.get_max_ride_time_by_req(rid);
-                        if (ride > max_r)
-                            mid.viol_ride += (ride - max_r);
+                        best_cost = cost;
+                        best_i = i;
+                        best_j = j;
                     }
                 }
-            }
-
-            EvalState after_del = mid;
-            const double del_svc = process_node(after_del, delivery_id, delivery_node);
-
-            {
-                const double ride = del_svc - (pickup_start_svc + pickup_node.st);
-                const double max_r = request.max_ride_time;
-                if (ride > max_r)
-                    after_del.viol_ride += (ride - max_r);
-            }
-
-            // Early termination: lower bound using only state accumulated so far
-            // (suffix can only add more distance, time, violations, etc.)
-            {
-                double lb_dist = (after_del.total_dist <= vehicle.L)
-                                     ? vehicle.lambda_k
-                                     : (vehicle.lambda_k + vehicle.c_k * (after_del.total_dist - vehicle.L));
-                double lb_f1 = lb_dist + vehicle.ct_k * ((after_del.cur_time + after_del.prev_st) - start_time)
-                               + cost_employee_total + after_del.cost_waiting;
-                double lb_fval = lb_f1 + Params::F2_WEIGHT * after_del.employee_q
-                                 + alpha * after_del.viol_ride
-                                 + beta * after_del.viol_tw
-                                 + gamma * after_del.viol_cap;
-                if (lb_fval >= best_cost)
-                    continue;  // Skip O(n) suffix processing
-            }
-
-            EvalState suf = after_del;
-            suf_pickup_saves.clear();
-
-            for (int k = j - 1; k < n; ++k)
-            {
-                const int sid = route.sequence[k];
-                const Node &snode = instance.nodes[sid];
-                const double ssvc = process_node(suf, sid, snode);
-
-                if (snode.type == NodeType::PICKUP)
+                else
                 {
-                    suf_pickup_saves.push_back({sid, pickup_svc[sid]});
-                    pickup_svc[sid] = ssvc;
-                }
-                else if (snode.type == NodeType::DELIVERY)
-                {
-                    const int rid = instance.get_req_id_by_node(sid);
-                    const int pid = instance.get_pickup_node_by_req(rid);
-                    if (pickup_svc[pid] != -1.0)
+
+                    bool aborted = false;
+                    for (int k = j + 1; k <= n; ++k)
                     {
-                        const double ride = ssvc - (pickup_svc[pid] + instance.nodes[pid].st);
-                        const double max_r = instance.get_max_ride_time_by_req(rid);
-                        if (ride > max_r)
-                            suf.viol_ride += (ride - max_r);
+                        int nid = route.sequence[k - 1];
+                        const Node &nd = instance.nodes[nid];
+                        double svc = process_node(st_next, nid, nd);
+
+                        if (nd.type == NodeType::DELIVERY)
+                        {
+                            int rid = instance.get_req_id_by_node(nid);
+                            int pid = instance.get_pickup_node_by_req(rid);
+
+                            if (pickup_svc[pid] != -1.0)
+                            {
+                                double ride = svc - (pickup_svc[pid] + instance.nodes[pid].st);
+                                double max_r = instance.get_max_ride_time_by_req(rid);
+                                if (ride > max_r)
+                                    st_next.viol_ride += (ride - max_r);
+                            }
+                        }
+                        else if (nd.type == NodeType::PICKUP)
+                        {
+
+                            pickup_restores.push_back({nid, pickup_svc[nid]});
+                            pickup_svc[nid] = svc;
+                        }
+                    }
+
+                    double dist_to_depot = instance.get_dist(st_next.prev_id, depot_id);
+                    double total_dist = st_next.total_dist + dist_to_depot;
+                    double cost_dist = (total_dist <= vehicle.L) ? vehicle.lambda_k : (vehicle.lambda_k + vehicle.c_k * (total_dist - vehicle.L));
+                    double cost_dur = vehicle.ct_k * ((st_next.cur_time + st_next.prev_st) - orig_start_time);
+
+                    double f1 = cost_dist + cost_dur + cost_employee_total + st_next.cost_waiting;
+                    double f2 = st_next.employee_q;
+                    double cost = f1 + Params::F2_WEIGHT * f2 + alpha * st_next.viol_ride + beta * st_next.viol_tw + gamma * st_next.viol_cap;
+
+                    if (cost < best_cost)
+                    {
+                        best_cost = cost;
+                        best_i = i;
+                        best_j = j;
                     }
                 }
-            }
-
-            for (auto it = suf_pickup_saves.rbegin(); it != suf_pickup_saves.rend(); ++it)
-                pickup_svc[it->first] = it->second;
-
-            const double cost_distance = suf.total_dist;
-            const double cost_duration = (suf.cur_time + suf.prev_st) - start_time;
-            const double cost_dist = (cost_distance <= vehicle.L)
-                                         ? vehicle.lambda_k
-                                         : (vehicle.lambda_k + vehicle.c_k * (cost_distance - vehicle.L));
-            const double f1 = cost_dist + vehicle.ct_k * cost_duration +
-                              cost_employee_total + suf.cost_waiting;
-            const double f2 = suf.employee_q;
-            const double f_val = f1 + Params::F2_WEIGHT * f2 +
-                                 alpha * suf.viol_ride +
-                                 beta * suf.viol_tw +
-                                 gamma * suf.viol_cap;
-
-            if (f_val < best_cost)
-            {
-                best_cost = f_val;
-                best_i = i;
-                best_j = j;
             }
         }
 
-        for (auto it = mid_pickup_saves.rbegin(); it != mid_pickup_saves.rend(); ++it)
+        for (auto it = pickup_restores.rbegin(); it != pickup_restores.rend(); ++it)
+        {
             pickup_svc[it->first] = it->second;
-
-        pickup_svc[pickup_id] = saved_new_pickup;
+        }
+        pickup_restores.clear();
+        pickup_svc[pickup_id] = saved_p_svc;
     }
 
     for (int id : pickup_cleanup)
@@ -582,14 +607,11 @@ std::pair<double, std::vector<int>> insert_request_best_position(
     if (best_i != -1)
     {
         best_seq.reserve(n + 2);
-        best_seq.insert(best_seq.end(), route.sequence.begin(),
-                        route.sequence.begin() + best_i);
+        best_seq.insert(best_seq.end(), route.sequence.begin(), route.sequence.begin() + best_i);
         best_seq.push_back(pickup_id);
-        best_seq.insert(best_seq.end(), route.sequence.begin() + best_i,
-                        route.sequence.begin() + best_j - 1);
+        best_seq.insert(best_seq.end(), route.sequence.begin() + best_i, route.sequence.begin() + best_j - 1);
         best_seq.push_back(delivery_id);
-        best_seq.insert(best_seq.end(), route.sequence.begin() + best_j - 1,
-                        route.sequence.end());
+        best_seq.insert(best_seq.end(), route.sequence.begin() + best_j - 1, route.sequence.end());
     }
 
     route.stats_valid = false;

@@ -174,7 +174,7 @@ json generate_matrix_file(const std::string &empData,
             blocks.push_back(block);
         }
         // ===================== THREAD FUNCTION =====================
-        std::atomic<bool> osrm_failed{false}; 
+        std::atomic<bool> osrm_failed{false};
 
         auto fetch_block = [&](const std::vector<int> &srcBlock,
                                const std::vector<int> &dstBlock)
@@ -202,7 +202,7 @@ json generate_matrix_file(const std::string &empData,
                 if (i + 1 < dstBlock.size())
                     dstStr << ";";
             }
-            
+
             std::string url =
                 "http://router.project-osrm.org/table/v1/driving/" +
                 coordStr.str() +
@@ -214,25 +214,6 @@ json generate_matrix_file(const std::string &empData,
                                          std::to_string(srcBlock.front()) + "_" +
                                          std::to_string(dstBlock.front()) + ".json");
 
-<<<<<<< HEAD
-            if (!do_haversine) {
-                std::string cmd = "curl -sS \"" + url + "\" -o \"" + tmpJson.string() + "\"";
-                if (std::system(cmd.c_str()) != 0) {
-                    osrm_failed = true;
-                    return;
-                }
-
-                std::ifstream jf(tmpJson);
-                json j;
-                if (jf.peek() != std::ifstream::traits_type::eof()) {
-                    jf >> j;
-                }
-
-                if(!j.contains("distances")) {
-                    osrm_failed = true;
-                    return;
-                }
-=======
             std::string cmd = "curl -sS \"" + url + "\" -o \"" + tmpJson.string() + "\"";
 
             bool osrm_success = false;
@@ -248,7 +229,6 @@ json generate_matrix_file(const std::string &empData,
                     {
                         std::ifstream jf(tmpJson);
                         jf >> j;
->>>>>>> 6d7d27a (final hosted)
 
                         // Verify the JSON actually contains our distance matrix
                         if (j.contains("distances"))
@@ -268,16 +248,11 @@ json generate_matrix_file(const std::string &empData,
             if (osrm_success)
             {
                 auto distances = j["distances"];
-<<<<<<< HEAD
-                for (size_t i = 0; i < srcBlock.size(); ++i) {
-                    for (size_t k = 0; k < dstBlock.size(); ++k) {
-=======
                 for (size_t i = 0; i < srcBlock.size(); ++i)
                 {
                     for (size_t k = 0; k < dstBlock.size(); ++k)
                     {
                         // Convert meters to kilometers
->>>>>>> 6d7d27a (final hosted)
                         outMatrix[srcBlock[i]][dstBlock[k]] =
                             distances[i][k].get<double>() / 1000.0;
                     }
@@ -285,18 +260,12 @@ json generate_matrix_file(const std::string &empData,
             }
             else
             {
-<<<<<<< HEAD
-                // Haversine logic
-                for (size_t i = 0; i < srcBlock.size(); ++i) {
-                    for (size_t k = 0; k < dstBlock.size(); ++k) {
-=======
                 // FALLBACK: Execute Haversine if curl failed, JSON was bad,
                 // "distances" was missing, or do_haversine is true.
                 for (size_t i = 0; i < srcBlock.size(); ++i)
                 {
                     for (size_t k = 0; k < dstBlock.size(); ++k)
                     {
->>>>>>> 6d7d27a (final hosted)
                         outMatrix[srcBlock[i]][dstBlock[k]] =
                             haversine(coords[srcBlock[i]].first, coords[srcBlock[i]].second,
                                       coords[dstBlock[k]].first, coords[dstBlock[k]].second);
@@ -309,29 +278,38 @@ json generate_matrix_file(const std::string &empData,
 
         std::vector<std::thread> threads;
 
-        for (const auto &srcBlock : blocks) {
-            for (const auto &dstBlock : blocks) {
+        for (const auto &srcBlock : blocks)
+        {
+            for (const auto &dstBlock : blocks)
+            {
                 threads.emplace_back(fetch_block, srcBlock, dstBlock);
             }
         }
 
-        for (auto &t : threads) {
-            if (t.joinable()) t.join();
+        for (auto &t : threads)
+        {
+            if (t.joinable())
+                t.join();
         }
 
-        if (osrm_failed && !do_haversine) {
-            do_haversine = 1; 
+        if (osrm_failed && !do_haversine)
+        {
+            do_haversine = 1;
             threads.clear();
 
             // Restart threads entirely in Haversine mode
-            for (const auto &srcBlock : blocks) {
-                for (const auto &dstBlock : blocks) {
+            for (const auto &srcBlock : blocks)
+            {
+                for (const auto &dstBlock : blocks)
+                {
                     threads.emplace_back(fetch_block, srcBlock, dstBlock);
                 }
             }
-            
-            for (auto &t : threads) {
-                if (t.joinable()) t.join();
+
+            for (auto &t : threads)
+            {
+                if (t.joinable())
+                    t.join();
             }
         }
 
@@ -445,9 +423,11 @@ int main()
         std::string empData = get_part("employees");
         std::string vehData = get_part("vehicles");
         std::string metaData = get_part("metadata");
+        std::string baseData = get_part("basedata");
+        std::string modeData = get_part("optimizationLevel");
 
-        if (empData.empty() || vehData.empty() || metaData.empty()) {
-            return crow::response(400, "Missing one of the 3 CSVs (employees, vehicles, metadata).");
+        if (empData.empty() || vehData.empty() || metaData.empty() || modeData.empty() || baseData.empty()) {
+            return crow::response(400, "Missing one of the 4 CSVs (employees, vehicles, metadata, baseline, mode).");
         }
 
         // 2. Setup Temp Directory (Absolute Path)
@@ -464,6 +444,10 @@ int main()
         saveFile((reqDir / "employees.csv").string(), empData);
         saveFile((reqDir / "vehicles.csv").string(), vehData);
         saveFile((reqDir / "metadata.csv").string(), metaData);
+        saveFile((reqDir / "baseline.csv").string(), baseData);
+
+
+        saveFile((reqDir / "mode.txt").string(), modeData);
 
         std::ifstream read_metadata("metadata.csv");
         std::string metadata_line;
@@ -485,18 +469,22 @@ int main()
 
         std::thread t1([&](){ alns_res = run_solver("ALNS", "main_ALNS", reqDir); });
         std::thread t2([&](){ bac_res = run_solver("Branch-And-Cut", "main_BAC", reqDir); });
-        std::thread t3([&](){ crds_res = run_solver("Clustering-Routing-DP-Solver", "main_crds", reqDir); });
+        //std::thread t3([&](){ crds_res = run_solver("Clustering-Routing-DP-Solver", "main_crds", reqDir); });
         std::thread t4([&](){ hd_res = run_solver("Heterogeneous_DARP", "hetero", reqDir); });
-        std::thread t5([&](){ vns_res = run_solver("Variable_Neighbourhood_Search", "main_vns", reqDir); });
-        // std::thread t6([&](){ god = run_solver("god", "god", reqDir); });
+        //std::thread t5([&](){ vns_res = run_solver("Variable_Neighbourhood_Search", "main_vns", reqDir); });
+        std::thread t6([&](){ god = run_solver("god", "god", reqDir); });
 
         t1.join();
         t2.join();
-        t3.join();
+        //t3.join();
         t4.join();
-        t5.join();
-        // t6.join();
+        //t5.join();
+        t6.join();
         
+        //Calculate cost saved and time saved here
+        std::string cost_saved;
+        std::string time_saved;
+
         // 6. Build Response
         json response;
         response["status"] = "finished";
@@ -516,12 +504,12 @@ int main()
             {"csv_employee", bac_res.output_employee}
         };
 
-        response["results"]["CRDS"] = {
-            {"status", crds_res.status},
-            {"logs", crds_res.logs},
-            {"csv_vehicle", crds_res.output_vehicle},
-            {"csv_employee", crds_res.output_employee}
-        };
+        // response["results"]["CRDS"] = {
+        //     {"status", crds_res.status},
+        //     {"logs", crds_res.logs},
+        //     {"csv_vehicle", crds_res.output_vehicle},
+        //     {"csv_employee", crds_res.output_employee}
+        // };
 
         response["results"]["HD"] = {
             {"status", hd_res.status},
@@ -530,19 +518,19 @@ int main()
             {"csv_employee", hd_res.output_employee}
         };
 
-        response["results"]["VNS"] = {
-            {"status", vns_res.status},
-            {"logs", vns_res.logs},
-            {"csv_vehicle", vns_res.output_vehicle},
-            {"csv_employee", vns_res.output_employee}
-        };
-
-        // response["results"]["GOD"] = {
-        //     {"status", god.status},
-        //     {"logs", god.logs},
-        //     {"csv_vehicle", god.output_vehicle},
-        //     {"csv_employee", god.output_employee}
+        // response["results"]["VNS"] = {
+        //     {"status", vns_res.status},
+        //     {"logs", vns_res.logs},
+        //     {"csv_vehicle", vns_res.output_vehicle},
+        //     {"csv_employee", vns_res.output_employee}
         // };
+
+        response["results"]["GOD"] = {
+            {"status", god.status},
+            {"logs", god.logs},
+            {"csv_vehicle", god.output_vehicle},
+            {"csv_employee", god.output_employee}
+        };
 
         mem = run_solver("memetic_algorithm", "main_Memetic", reqDir);
 
@@ -552,6 +540,8 @@ int main()
             {"csv_vehicle", mem.output_vehicle},
             {"csv_employee", mem.output_employee}
         };
+
+        
 
         crow::response res(200, response.dump());
         res.add_header("Access-Control-Allow-Origin", "*");
